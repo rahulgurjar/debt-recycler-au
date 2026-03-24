@@ -1,4 +1,29 @@
 const request = require('supertest');
+
+// Mock the database module before importing app
+jest.mock('../src/db', () => ({
+  saveScenario: jest.fn(async (name, params, projection) => ({
+    id: 1,
+    name,
+    ...params,
+  })),
+  getScenarios: jest.fn(async () => [
+    {
+      id: 1,
+      name: 'Test Scenario',
+      final_wealth: 3349321.30,
+      xirr: 0.1353,
+    },
+  ]),
+  getScenario: jest.fn(async (id) => ({
+    id,
+    name: 'Test Scenario',
+    projections: [],
+  })),
+  deleteScenario: jest.fn(async (id) => true),
+  healthCheck: jest.fn(async () => ({ connected: true })),
+}));
+
 const app = require('../src/api');
 
 describe('Debt Recycling API', () => {
@@ -54,35 +79,46 @@ describe('Debt Recycling API', () => {
     });
   });
 
-  describe('POST /api/scenarios (unimplemented)', () => {
-    it('should return not implemented error', async () => {
+  describe('POST /api/scenarios', () => {
+    it('should save a scenario with default parameters', async () => {
       const res = await request(app)
         .post('/api/scenarios')
         .send({ name: 'Test Scenario' });
 
       expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.scenario).toBeDefined();
+      expect(res.body.projection).toBeDefined();
+    });
+
+    it('should require scenario name', async () => {
+      const res = await request(app)
+        .post('/api/scenarios')
+        .send({});
+
+      expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error).toContain('Database');
     });
   });
 
-  describe('GET /api/scenarios (unimplemented)', () => {
-    it('should return not implemented error', async () => {
-      const res = await request(app)
-        .get('/api/scenarios');
+  describe('GET /api/scenarios', () => {
+    it('should list all scenarios', async () => {
+      const res = await request(app).get('/api/scenarios');
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(false);
+      expect(res.body.success).toBe(true);
+      expect(res.body.scenarios).toBeDefined();
+      expect(Array.isArray(res.body.scenarios)).toBe(true);
     });
   });
 
-  describe('GET /api/scenarios/:id (unimplemented)', () => {
-    it('should return not implemented error', async () => {
-      const res = await request(app)
-        .get('/api/scenarios/123');
+  describe('GET /api/scenarios/:id', () => {
+    it('should get a specific scenario', async () => {
+      const res = await request(app).get('/api/scenarios/1');
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(false);
+      expect(res.body.success).toBe(true);
+      expect(res.body.scenario).toBeDefined();
     });
   });
 });

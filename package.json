@@ -9,7 +9,8 @@
     "test": "jest --coverage",
     "test:watch": "jest --watch",
     "lint": "eslint src tests",
-    "format": "prettier --write src tests"
+    "format": "prettier --write src tests",
+    "migrate": "node scripts/migrate.js"
   },
   "keywords": [
     "debt-recycling",

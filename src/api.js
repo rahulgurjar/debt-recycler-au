@@ -9,13 +9,26 @@
 
 const express = require('express');
 const { calculate } = require('./calculator');
+const { saveScenario, getScenarios, getScenario, deleteScenario, healthCheck } = require('./db');
 
 const app = express();
 app.use(express.json());
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/health', async (req, res) => {
+  try {
+    const dbStatus = await healthCheck();
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      database: dbStatus,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      error: error.message,
+    });
+  }
 });
 
 /**
@@ -56,36 +69,127 @@ app.post('/api/calculate', (req, res) => {
 
 /**
  * POST /api/scenarios
- * Save a scenario (requires database)
+ * Save a scenario (calculate + store in database)
  */
-app.post('/api/scenarios', (req, res) => {
-  res.json({
-    success: false,
-    error: 'Database not yet configured. Use /api/calculate for one-off projections.',
-  });
+app.post('/api/scenarios', async (req, res) => {
+  try {
+    const { name, parameters } = req.body;
+
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        error: 'Scenario name is required',
+      });
+    }
+
+    const params = {
+      initial_outlay: parameters?.initial_outlay || 55000,
+      gearing_ratio: parameters?.gearing_ratio || 0.45,
+      initial_loan: parameters?.initial_loan || 45000,
+      annual_investment: parameters?.annual_investment || 25000,
+      inflation: parameters?.inflation || 0.03,
+      loc_interest_rate: parameters?.loc_interest_rate || 0.07,
+      etf_dividend_rate: parameters?.etf_dividend_rate || 0.03,
+      etf_capital_appreciation: parameters?.etf_capital_appreciation || 0.07,
+      marginal_tax: parameters?.marginal_tax || 0.47,
+      user_id: parameters?.user_id || null,
+    };
+
+    // Calculate projection
+    const projection = calculate(params);
+
+    // Save to database
+    const scenario = await saveScenario(name, params, projection);
+
+    res.json({
+      success: true,
+      scenario,
+      projection,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
 });
 
 /**
  * GET /api/scenarios
- * List saved scenarios (requires database)
+ * List saved scenarios
  */
-app.get('/api/scenarios', (req, res) => {
-  res.json({
-    success: false,
-    error: 'Database not yet configured.',
-    scenarios: [],
-  });
+app.get('/api/scenarios', async (req, res) => {
+  try {
+    const userId = req.query.user_id;
+    const scenarios = await getScenarios(userId);
+
+    res.json({
+      success: true,
+      scenarios,
+      count: scenarios.length,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
 });
 
 /**
  * GET /api/scenarios/:id
- * Get one scenario (requires database)
+ * Get one scenario with full projections
  */
-app.get('/api/scenarios/:id', (req, res) => {
-  res.json({
-    success: false,
-    error: 'Database not yet configured.',
-  });
+app.get('/api/scenarios/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const scenario = await getScenario(parseInt(id, 10));
+
+    if (!scenario) {
+      return res.status(404).json({
+        success: false,
+        error: 'Scenario not found',
+      });
+    }
+
+    res.json({
+      success: true,
+      scenario,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/scenarios/:id
+ * Delete a scenario
+ */
+app.delete('/api/scenarios/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deleted = await deleteScenario(parseInt(id, 10));
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        error: 'Scenario not found',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Scenario deleted',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
 });
 
 module.exports = app;
