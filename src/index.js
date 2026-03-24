@@ -8,7 +8,7 @@ const app = require('./api');
 
 // Wrap Express app for Lambda
 const handler = serverless(app, {
-  request: (request, event, context) => {
+  request: (request, event, _context) => {
     request.context = event.requestContext;
     request.event = event;
   },

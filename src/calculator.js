@@ -127,9 +127,6 @@ function calculate(params) {
   // After-Tax Dividend = Taxable Dividend × (1 - tax_rate)
   const after_tax_dividend = taxable_dividend * (1 - marginal_tax);
 
-  // Annual investment in Year 0
-  // The spreadsheet uses this adjustment for the initial annual investment
-  const annual_inv_year0 = annual_investment * Math.pow(1 + inflation, -1);
 
   // PF Value at 30 June = PF Value (start) × (1 + appreciation) + After-Tax Dividend
   // Note: Annual investment is NOT added to PF Value in Year 0, it's a separate cash flow for XIRR
@@ -196,7 +193,6 @@ function calculate(params) {
 
     // 6. New loan amount (maintains gearing from start of year)
     const new_loan_year = new_loan_start;
-    const additional_loan_year = new_loan_year - loan;
 
     // 7. Calculate wealth with loan adjustment for negative after-tax dividend
     const loan_adjustment_year = Math.max(0, -after_tax_dividend_year);

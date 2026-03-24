@@ -2,7 +2,7 @@ const request = require('supertest');
 
 // Mock the database module before importing app
 jest.mock('../src/db', () => ({
-  saveScenario: jest.fn(async (name, params, projection) => ({
+  saveScenario: jest.fn(async (name, params, _projection) => ({
     id: 1,
     name,
     ...params,
@@ -15,12 +15,12 @@ jest.mock('../src/db', () => ({
       xirr: 0.1353,
     },
   ]),
-  getScenario: jest.fn(async (id) => ({
-    id,
+  getScenario: jest.fn(async (_id) => ({
+    id: 1,
     name: 'Test Scenario',
     projections: [],
   })),
-  deleteScenario: jest.fn(async (id) => true),
+  deleteScenario: jest.fn(async (_id) => true),
   healthCheck: jest.fn(async () => ({ connected: true })),
 }));
 

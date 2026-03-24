@@ -96,9 +96,6 @@ describe('Debt Recycling Calculator - Spreadsheet Verification', () => {
         const actualWealth = result.years[year].wealth_30_june;
         const expectedWealth = expectedYearlyWealth[year];
 
-        // Allow ±0.01% tolerance (±$1 for $10,000, ±$3.35 for $335,000)
-        const tolerance = expectedWealth * 0.0001;
-
         expect(actualWealth).toBeCloseTo(expectedWealth, 0);
       }
     });
