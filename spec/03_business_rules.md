@@ -1,5 +1,73 @@
 # Business Rules — Debt Recycling Calculations
 
+## Australian Tax Rules (2026)
+
+### Capital Gains Tax (CGT)
+
+**CGT Discount (12-month rule):**
+- Hold investment < 12 months: 100% of capital gain taxed at your marginal rate
+- Hold investment ≥ 12 months: **50% of capital gain** taxed at your marginal rate (CGT discount applies)
+
+**Calculation:**
+```
+Taxable Capital Gain = (Sale Price - Cost Base) × 50%  [if held ≥12 months]
+Tax on CGT = Taxable Capital Gain × Marginal Tax Rate
+```
+
+**Example:** $100k property appreciates to $150k after 20 years:
+- Capital gain: $50,000
+- Taxable gain (50% discount): $25,000
+- At 45% tax rate: $25,000 × 0.45 = **$11,250 tax**
+
+### Investment Loan Interest Deduction (Critical)
+
+**Key Rule:** Interest on money borrowed to invest in income-producing assets is tax-deductible.
+
+**Eligibility:**
+- LOC must be used to purchase investment assets (ETFs, shares, rental property)
+- Interest must be for investment purpose (not personal use)
+- Investment must produce assessable income (dividends, rental income)
+
+**Tax Benefit:**
+```
+Annual Tax Saving = LOC Interest × Marginal Tax Rate
+
+Example: $100k loan at 7% = $7,000 interest/year
+At 45% tax: $7,000 × 0.45 = $3,150 tax saving/year
+```
+
+### Dividend Income & Franking Credits
+
+**Australian Dividends:**
+- Franking credit: company has already paid tax on profits
+- Franked dividends: grossed up by franking credit
+- Unfranked dividends: no credit (e.g., ETFs tracking international indices)
+
+**Calculation:**
+```
+Dividend Income = Cash Dividend + Franking Credit (may apply)
+Taxable Income = Dividend Income
+Tax = Taxable Income × Marginal Tax Rate
+Net Dividend = Cash Dividend - (Tax - Franking Credit)
+```
+
+**Our Model Simplification:** Assumes 30% dividend yield is after-tax equivalent. Adjust based on franking for specific ETFs.
+
+### Marginal Tax Rates (2026)
+
+```
+Income           | Tax Rate (incl. Medicare Levy @ 2%)
+$0 - $18,200     | 0%
+$18,201 - $45k   | 21% + 2% = 23%
+$45,001 - $120k  | 37% + 2% = 39%
+$120,001 - $180k | 45% + 2% = 47%
+$180,001+        | 47% + 2% = 49%
+```
+
+**Our Model Baseline:** 47% marginal tax (high-income earner, $120k-$180k+)
+
+---
+
 ## Core Formulas (from Spreadsheet Model)
 
 ### Year 0 (Initial Outlay)
@@ -81,6 +149,87 @@ Solve for r = XIRR
 4. **LOC interest rate:** Variable (tested at 4%, 4.5%, ... 12%)
 5. **ETF dividend rate:** 3% (can vary in sensitivity analysis)
 6. **ETF capital appreciation:** 7% (can vary in sensitivity analysis)
+
+## User Forecasting & Stats
+
+### User Profile Data
+
+The calculator should collect (optional, for forecasting):
+
+**Demographics:**
+- Age (affects time horizon and investment risk tolerance)
+- Current income (determines marginal tax rate)
+- Marital status (impacts tax planning, potential joint investment)
+- Employment status (stability affects loan serviceability)
+
+**Financial Snapshot:**
+- Property value (current market estimate)
+- Existing mortgage balance (non-deductible debt)
+- Other investments (diversification consideration)
+- Risk tolerance (conservative/moderate/aggressive)
+
+**Calculation Inputs (already collected):**
+- Initial equity available to borrow
+- Annual cash investment capacity
+- Target gearing ratio
+- Time horizon (typically 10-20 years)
+
+### Forecasting Features
+
+**1. XIRR by Income Bracket**
+Show how XIRR changes if tax rate varies:
+```
+45% tax rate: 12.55% XIRR
+39% tax rate: 10.2% XIRR  (lower income)
+49% tax rate: 13.8% XIRR  (higher income)
+```
+
+**2. Age-Based Projections**
+Adjust time horizon based on age:
+```
+Age 35, retire at 65: 30-year forecast
+Age 45, retire at 65: 20-year forecast
+Age 55, retire at 65: 10-year forecast
+```
+
+**3. Sensitivity to Interest Rates**
+Critical for feasibility:
+```
+LOC at 5%: 14.2% XIRR (favorable conditions)
+LOC at 7%: 12.55% XIRR (current assumption)
+LOC at 9%: 11.0% XIRR (rising rate risk)
+```
+
+**4. Risk Profile Recommendation**
+Based on user inputs:
+- **Conservative:** Property-only, min gearing (10-20%)
+- **Moderate:** Mixed portfolio, standard gearing (40-50%)
+- **Aggressive:** Diversified ETFs, higher gearing (60-75%)
+
+### User Statistics to Display
+
+At end of projection:
+
+```
+Key Metrics:
+- Initial Investment: $55,000
+- Annual Cash Contribution: $25,000 (inflated annually)
+- Total Cash Invested Over 20 Years: ~$638,000
+- Final Portfolio Value: $2,929,892
+- Final Own Capital (Wealth): $2,929,892 - Loan
+
+Risk Indicators:
+- Peak Gearing: 45% (maintained throughout)
+- Interest Coverage Ratio: Year 20 dividend / annual LOC interest
+- Loan Serviceability: Annual LOC interest / annual income
+
+Time to Financial Goals:
+- Break-even vs property-only strategy: Year 5
+- Wealth double: Year X
+- Retirement readiness (custom target): Year Y
+```
+
+---
 
 ## Test Cases
 

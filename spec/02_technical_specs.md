@@ -4,9 +4,81 @@
 
 - **Frontend:** React 18, Vite, TypeScript
 - **Backend:** Node.js + Express
-- **Database:** PostgreSQL
+- **Database:** PostgreSQL (AWS RDS)
 - **Tests:** Jest + React Testing Library
 - **Deploy:** AWS Lambda + API Gateway
+- **Hosting:** AWS S3 + CloudFront (static frontend)
+- **Custom Domain:** debt-recycler-au.com (Route53 DNS)
+
+## Architecture
+
+```
+Public Internet
+      ↓
+┌─────────────────────────────────────────────┐
+│   debt-recycler-au.com                      │
+│   (Route53 DNS)                             │
+└──────────────┬──────────────────────────────┘
+               ↓
+        CloudFront (CDN)
+        (HTTPS, caching)
+        ↙              ↘
+    S3 Bucket        API Gateway
+    (Frontend)       (REST API)
+    - index.html       ↓
+    - assets        Lambda Functions
+                    - /api/calculate
+                    - /api/scenarios
+                    - /api/projects/:id
+                       ↓
+                    RDS PostgreSQL
+                    (scenarios, projections)
+```
+
+## GitHub Repository
+
+**URL:** github.com/rahulgurjar/debt-recycler-au
+
+**Structure:**
+```
+debt-recycler-au/
+├── frontend/              (React SPA)
+│   ├── src/
+│   ├── public/
+│   └── vite.config.ts
+├── backend/               (Node.js)
+│   ├── src/
+│   │   ├── index.js       (Express server)
+│   │   ├── calculator.js  (core logic)
+│   │   └── db.js          (PostgreSQL client)
+│   └── package.json
+├── infra/                 (AWS CloudFormation/SAM)
+│   ├── template.yaml      (Lambda + API Gateway)
+│   └── db/
+│       └── schema.sql     (PostgreSQL schema)
+├── .github/workflows/     (CI/CD)
+│   ├── test.yml           (Run tests on PR)
+│   └── deploy.yml         (Deploy on main)
+├── spec/                  (Technical & business specs)
+├── tests/                 (Shared test fixtures)
+└── README.md
+```
+
+## CI/CD Pipeline (GitHub Actions)
+
+**On Every PR:**
+- Run Jest tests (backend + frontend)
+- Check coverage (≥80% required)
+- Lint + format check
+- Build React SPA (verify no errors)
+
+**On Merge to Main:**
+- Run full test suite
+- Build & push Lambda functions to AWS
+- Deploy RDS migrations (if any)
+- Upload frontend to S3
+- Invalidate CloudFront cache
+- Tag release in git (semantic versioning)
 
 ## API Endpoints
 
