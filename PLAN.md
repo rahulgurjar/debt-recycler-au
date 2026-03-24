@@ -128,6 +128,29 @@ See spec/03_business_rules.md for formula.
 
 ---
 
+## Ralph Loop Governance (GUARDRAILS)
+
+**All development must follow: /workspace/RALPH_GUARDRAILS.md**
+
+Linear tickets for this phase:
+- **RAH-59**: Feature Request (Phase 1 - Calculator Engine)
+- **RAH-62**: Spec (Calculator specification + test cases)
+- **RAH-63**: Tests (Test suite with run instructions)
+- **RAH-61**: Blocker (Formula validation - Year 10+ mismatch)
+- **RAH-64**: Verification (Production validation procedures)
+
+**Requirements:**
+✅ Spec in Linear (RAH-62)
+✅ Tests in Linear with "How to Run" (RAH-63)
+✅ Verification in Linear with "How to Verify" (RAH-64)
+✅ Tests runnable by independent reviewer (no AI)
+✅ Verification runnable by independent reviewer (no AI)
+❌ Formula blocker (RAH-61) must be resolved
+❌ Tests must all pass before marking Done
+❌ Git commits must reference ticket IDs (e.g., `Closes RAH-59`)
+
+---
+
 ## Phase 1 Status Update
 
 ### Completed ✅
