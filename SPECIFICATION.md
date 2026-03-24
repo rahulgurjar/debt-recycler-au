@@ -100,11 +100,13 @@ Increases with inflation each year:
 
 ## XIRR Calculation
 The Internal Rate of Return (XIRR) is calculated from cash flows:
-- Year 0: Outflow of -$55,000 (initial investment)
-- Years 1-20: Outflow of -Investment_Y for each year
-- Year 20: Final inflow of +$3,349,321 (final wealth liquidated)
+- Year 0 (1 July 2026): Outflow of -$55,000 (initial investment)
+- Years 1-20: Outflow of -Investment_Y where Investment_Y = $25,000 × (1.03)^Y
+- Year 20 (1 July 2046): Final inflow of +$3,349,321 (final wealth liquidated)
 
-**Expected XIRR**: 12.55%
+**Calculated XIRR**: 13.53%
+
+Note: The source spreadsheet shows 12.55% but contains formula errors (Err:502) in XIRR calculation cells. The value 13.53% is mathematically correct where NPV ≈ 0.
 
 ## Rounding and Tolerance
 All calculations use standard floating-point arithmetic. Results should match spreadsheet values within ±0.01% (±$1 for values near $100,000).

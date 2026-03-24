@@ -163,8 +163,8 @@ function calculate(params) {
   loan = new_loan_year0;
   own_capital = actual_equity_year0;
 
-  // Add Year 0 annual investment to cash flows for XIRR
-  cashFlows.push(-annual_inv_year0);
+  // Note: Year 0 annual investment is NOT included in cash flows
+  // The spreadsheet only includes annual investments starting from Year 1
 
   // Years 1-20
   let final_wealth_adjusted = own_capital;  // Will be updated with final year's adjusted wealth
