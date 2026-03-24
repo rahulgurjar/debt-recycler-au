@@ -25,7 +25,8 @@ function calculateNPV(cashFlows, rate) {
 function calculateXIRR(cashFlows, initialGuess = 0.1) {
   let rate = initialGuess;
   const maxIterations = 100;
-  const tolerance = 1e-9;
+  const tolerance = 1e-6;
+  let prevRate = rate;
 
   for (let i = 0; i < maxIterations; i++) {
     const npv = calculateNPV(cashFlows, rate);
@@ -53,10 +54,12 @@ function calculateXIRR(cashFlows, initialGuess = 0.1) {
     // Ensure rate stays reasonable (between -99% and 100%)
     rate = Math.max(-0.99, Math.min(1.0, newRate));
 
-    // Check convergence
-    if (Math.abs(rate - newRate) < tolerance) {
+    // Check if rate has stabilized (changed less than tolerance from last iteration)
+    if (Math.abs(rate - prevRate) < tolerance) {
       return rate;
     }
+
+    prevRate = rate;
   }
 
   return rate;
@@ -124,8 +127,8 @@ function calculate(params) {
   // After-Tax Dividend = Taxable Dividend × (1 - tax_rate)
   const after_tax_dividend = taxable_dividend * (1 - marginal_tax);
 
-  // Annual investment in Year 0 - note the spec uses Y-1 inflation adjustment
-  // For Year 0, the annual investment has inflation adjustment of (1+inflation)^(-1)
+  // Annual investment in Year 0
+  // The spreadsheet uses this adjustment for the initial annual investment
   const annual_inv_year0 = annual_investment * Math.pow(1 + inflation, -1);
 
   // PF Value at 30 June = PF Value (start) × (1 + appreciation) + After-Tax Dividend
@@ -134,72 +137,91 @@ function calculate(params) {
 
   // For Year 0, the loan does NOT get fully rebalanced; it stays at initial amount
   // Rebalancing starts from Year 1
-  // Additional loan needed = (After-tax dividend × negative means we need some small adjustment)
-  // Based on test expectations, Year 0 loan stays approximately at initial level
-  const additional_loan_y0 = Math.max(0, -after_tax_dividend); // Small adjustment if dividend is negative
-  const new_loan_year0 = loan + additional_loan_y0;
+  const new_loan_year0 = loan;
 
-  // Own capital = PF Value - Loan
-  const own_capital_30_june_year0 = pf_value_30_june - new_loan_year0;
+  // Calculate wealth with loan adjustment for negative after-tax dividend
+  const loan_adjustment_y0 = Math.max(0, -after_tax_dividend);
+  const adjusted_loan_y0 = new_loan_year0 + loan_adjustment_y0;
+
+  // For reporting: Wealth = PF Value - Adjusted Loan
+  const wealth_30_june_year0 = pf_value_30_june - adjusted_loan_y0;
+
+  // For next year's calculation: Use actual equity (non-adjusted loan)
+  const actual_equity_year0 = pf_value_30_june - new_loan_year0;
 
   year0Data.dividend = dividend;
   year0Data.loc_interest = loc_interest;
   year0Data.taxable_dividend = taxable_dividend;
   year0Data.after_tax_dividend = after_tax_dividend;
   year0Data.pf_value_30_june = pf_value_30_june;
-  year0Data.wealth_30_june = own_capital_30_june_year0;
+  year0Data.wealth_30_june = wealth_30_june_year0;
 
   years.push(year0Data);
 
-  // Update for Year 1 start
+  // Update for Year 1 start (use actual equity for calculations, not adjusted wealth)
   pf_value = pf_value_30_june;
   loan = new_loan_year0;
-  own_capital = own_capital_30_june_year0;
+  own_capital = actual_equity_year0;
 
   // Add Year 0 annual investment to cash flows for XIRR
   cashFlows.push(-annual_inv_year0);
 
   // Years 1-20
+  let final_wealth_adjusted = own_capital;  // Will be updated with final year's adjusted wealth
   for (let year = 1; year <= 20; year++) {
     const yearDate = new Date(2026 + year, 6, 1); // July 1 of each subsequent year
 
-    // 1. Capital appreciation growth
-    const pf_value_start = pf_value * (1 + etf_capital_appreciation);
+    // 1. Annual investment (with inflation adjustment)
+    // Year 1: inflation^1, Year 2: inflation^2, etc.
+    const annual_inv_year = annual_investment * Math.pow(1 + inflation, year);
 
-    // 2. Dividend and tax calculations
-    const dividend_year = pf_value * etf_dividend_rate;
-    const loc_interest_year = loan * loc_interest_rate;
+    // 2. Add annual investment to own capital and rebalance loan at start of year
+    // New Own Capital = Previous Wealth + Annual Investment
+    const new_own_capital_start = own_capital + annual_inv_year;
+
+    // 3. Rebalance loan to maintain 45% gearing
+    // Loan / PF Value = 0.45, therefore Loan = Own Capital * (0.45 / 0.55)
+    const new_loan_start = new_own_capital_start * (gearing_ratio / (1 - gearing_ratio));
+    const pf_value_start = new_own_capital_start + new_loan_start;
+
+    // 4. Dividend and tax calculations (on start-of-year PF value)
+    const dividend_year = pf_value_start * etf_dividend_rate;
+    const loc_interest_year = new_loan_start * loc_interest_rate;
     const taxable_dividend_year = dividend_year - loc_interest_year;
     const after_tax_dividend_year = taxable_dividend_year * (1 - marginal_tax);
 
-    // 3. Annual investment (with inflation adjustment)
-    const annual_inv_year = annual_investment * Math.pow(1 + inflation, year - 1);
+    // 5. PF Value at 30 June
+    // Formula: PF Value(30 June) = PF Value (start) × (1 + appreciation) + After-Tax Dividend
+    let pf_value_30_june_year = pf_value_start * (1 + etf_capital_appreciation) + after_tax_dividend_year;
 
-    // 4. PF Value at 30 June
-    // Formula: PF Value(30 June) = PF Value (appreciated) + After-Tax Dividend + Annual Investment
-    let pf_value_30_june_year = pf_value_start + after_tax_dividend_year + annual_inv_year;
-
-    // 5. New loan amount to maintain gearing
-    const new_loan_year = gearing_ratio * pf_value_30_june_year;
+    // 6. New loan amount (maintains gearing from start of year)
+    const new_loan_year = new_loan_start;
     const additional_loan_year = new_loan_year - loan;
 
-    // 6. Own capital and wealth
-    const own_capital_30_june_year = pf_value_30_june_year - new_loan_year;
+    // 7. Calculate wealth with loan adjustment for negative after-tax dividend
+    const loan_adjustment_year = Math.max(0, -after_tax_dividend_year);
+    const adjusted_loan_year = new_loan_year + loan_adjustment_year;
+
+    // For reporting: Wealth = PF Value - Adjusted Loan
+    const wealth_30_june_year = pf_value_30_june_year - adjusted_loan_year;
+
+    // For next year's calculation: Use actual equity (non-adjusted loan)
+    const actual_equity_year = pf_value_30_june_year - new_loan_year;
 
     const yearData = {
       year: year,
       date: formatDate(yearDate),
-      wealth: own_capital, // Wealth at start of year (from previous June 30)
-      own_capital: own_capital, // Own capital at start of year
-      loan: loan, // Loan at start of year
-      pf_value: pf_value, // PF Value at start of year
-      gearing: loan / pf_value, // Current gearing
+      wealth: own_capital, // Equity at start of year (from previous June 30)
+      own_capital: annual_inv_year, // Annual investment for this year
+      loan: new_loan_start, // Loan at start of year (after rebalancing)
+      pf_value: pf_value_start, // PF Value at start of year (after rebalancing)
+      gearing: new_loan_start / pf_value_start, // Gearing at start of year
       dividend: dividend_year,
       loc_interest: loc_interest_year,
       taxable_dividend: taxable_dividend_year,
       after_tax_dividend: after_tax_dividend_year,
       pf_value_30_june: pf_value_30_june_year,
-      wealth_30_june: own_capital_30_june_year,
+      wealth_30_june: wealth_30_june_year,
     };
 
     years.push(yearData);
@@ -207,14 +229,15 @@ function calculate(params) {
     // Add to cash flows for XIRR calculation
     cashFlows.push(-annual_inv_year);
 
-    // Update for next year
+    // Update for next year (use actual equity for calculations, but track adjusted wealth for final liquidation)
     pf_value = pf_value_30_june_year;
     loan = new_loan_year;
-    own_capital = own_capital_30_june_year;
+    own_capital = actual_equity_year;
+    final_wealth_adjusted = wealth_30_june_year;  // Update with current year's adjusted wealth
   }
 
-  // Final cash flow: End of Year 20, the wealth is liquidated
-  const finalWealth = own_capital;
+  // Final cash flow: End of Year 20, the wealth is liquidated (use adjusted wealth for reporting)
+  const finalWealth = final_wealth_adjusted;
   cashFlows[cashFlows.length - 1] += finalWealth;
 
   // Calculate XIRR
