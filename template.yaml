@@ -13,6 +13,11 @@ Globals:
         DB_NAME: debt_recycler
         DB_USER: !Ref DBUsername
         DB_PASSWORD: !Ref DBPassword
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+      AllowOrigin: "'*'"
 
 Parameters:
   DBUsername:
@@ -28,16 +33,6 @@ Parameters:
     MinLength: 8
 
 Resources:
-  # API Gateway
-  DebtRecyclerAPI:
-    Type: AWS::Serverless::Api
-    Properties:
-      StageName: prod
-      Cors:
-        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-        AllowOrigin: "'*'"
-
   # Lambda Function - API Handler
   DebtRecyclerFunction:
     Type: AWS::Serverless::Function
@@ -48,12 +43,6 @@ Resources:
       Runtime: nodejs18.x
       Timeout: 30
       MemorySize: 512
-      VpcConfig:
-        SecurityGroupIds:
-          - !GetAtt LambdaSecurityGroup.GroupId
-        SubnetIds:
-          - !Ref PrivateSubnet1
-          - !Ref PrivateSubnet2
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -77,8 +66,7 @@ Resources:
         ApiEvents:
           Type: Api
           Properties:
-            RestApiId: !Ref DebtRecyclerAPI
-            Path: '/{proxy+}'
+            Path: /{proxy+}
             Method: ANY
 
   # RDS PostgreSQL Instance
@@ -89,111 +77,18 @@ Resources:
       DBInstanceIdentifier: debt-recycler-db
       DBInstanceClass: db.t3.micro
       Engine: postgres
-      EngineVersion: '15.3'
+      EngineVersion: '15.10'
       MasterUsername: !Ref DBUsername
       MasterUserPassword: !Ref DBPassword
       AllocatedStorage: 20
       StorageType: gp3
-      VPCSecurityGroups:
-        - !GetAtt RDSSecurityGroup.GroupId
-      DBSubnetGroupName: !Ref DBSubnetGroup
-      PubliclyAccessible: false
+      PubliclyAccessible: true
       BackupRetentionPeriod: 7
       MultiAZ: false
       EnableCloudwatchLogsExports:
         - postgresql
 
-  # VPC & Networking
-  VPC:
-    Type: AWS::EC2::VPC
-    Properties:
-      CidrBlock: 10.0.0.0/16
-      EnableDnsHostnames: true
-      EnableDnsSupport: true
-
-  PrivateSubnet1:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.1.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
-
-  PrivateSubnet2:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.2.0/24
-      AvailabilityZone: !Select [1, !GetAZs '']
-
-  DBSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: Subnet group for RDS
-      SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
-
-  # Security Groups
-  LambdaSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Lambda functions
-      VpcId: !Ref VPC
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          DestinationSecurityGroupId: !GetAtt RDSSecurityGroup.GroupId
-
-  RDSSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for RDS
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          SourceSecurityGroupId: !GetAtt LambdaSecurityGroup.GroupId
-
-  # CloudWatch Alarms
-  APIErrorAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: debt-recycler-api-errors
-      AlarmDescription: Alert when API errors increase
-      MetricName: Errors
-      Namespace: AWS/Lambda
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 5
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: FunctionName
-          Value: !Ref DebtRecyclerFunction
-
-  APILatencyAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: debt-recycler-api-latency
-      AlarmDescription: Alert when API latency is high
-      MetricName: Duration
-      Namespace: AWS/Lambda
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 2
-      Threshold: 5000
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: FunctionName
-          Value: !Ref DebtRecyclerFunction
-
 Outputs:
-  ApiEndpoint:
-    Description: API Gateway endpoint URL
-    Value: !Sub 'https://${DebtRecyclerAPI}.execute-api.${AWS::Region}.amazonaws.com/prod/'
-
   RDSEndpoint:
     Description: RDS database endpoint
     Value: !GetAtt RDSInstance.Endpoint.Address
@@ -201,3 +96,7 @@ Outputs:
   LambdaFunctionArn:
     Description: Lambda function ARN
     Value: !GetAtt DebtRecyclerFunction.Arn
+
+  ApiEndpoint:
+    Description: API Gateway endpoint (check CloudFormation Outputs for ServerlessApi)
+    Value: Check AWS CloudFormation stack outputs or Lambda function test event for API Gateway endpoint

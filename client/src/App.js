@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import Dashboard from './components/Dashboard';
 import ScenarioList from './components/ScenarioList';
+import Tutorial from './components/Tutorial';
 import './App.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
@@ -35,6 +36,12 @@ function App() {
         >
           Saved Scenarios
         </button>
+        <button
+          className={`nav-btn ${activeTab === 'tutorial' ? 'active' : ''}`}
+          onClick={() => setActiveTab('tutorial')}
+        >
+          Tutorial & Specs
+        </button>
       </nav>
 
       <main className="app-main">
@@ -43,6 +50,9 @@ function App() {
         )}
         {activeTab === 'scenarios' && (
           <ScenarioList refresh={refreshScenarios} />
+        )}
+        {activeTab === 'tutorial' && (
+          <Tutorial />
         )}
       </main>
 
