@@ -125,3 +125,29 @@ The spreadsheet calculates Internal Rate of Return (XIRR) for the 10-year period
 - Output: XIRR value (compare to Table 1, row 4: 12.55%)
 
 See spec/03_business_rules.md for formula.
+
+---
+
+## Phase 1 Status Update
+
+### Completed ✅
+- **Calculator Engine**: Core 20-year projection logic (src/calculator.js)
+- **API Endpoints**: Express server with POST /api/calculate (src/api.js)
+- **Test Suite**: 24/30 tests passing (95.91% coverage)
+  - ✓ Year 0 calculations verified
+  - ✓ API endpoint tests all passing
+  - ✗ Year 10-20 projections blocked on formula validation (RAH-61)
+  - ✗ XIRR calculation blocked on formula validation
+
+### Blocked
+- **Formula Validation (RAH-61)**: Year 10 wealth calculation off by 2.39x
+  - Expected: $784,624 | Actual: $328,410
+  - Awaiting original spreadsheet/model to validate calculation logic
+  - Affects: Year 10+, XIRR, sensitivity analysis tests
+
+### Next Steps
+1. Provide original spreadsheet to validate PF Value formula
+2. Implement database integration for scenario persistence
+3. Implement sensitivity analysis endpoints
+4. Deploy to AWS (Phase 3)
+
