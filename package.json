@@ -1,0 +1,33 @@
+{
+  "name": "debt-recycler-au",
+  "version": "0.1.0",
+  "description": "Debt recycling calculator for Australian property investors",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest --coverage",
+    "test:watch": "jest --watch",
+    "lint": "eslint src tests",
+    "format": "prettier --write src tests"
+  },
+  "keywords": [
+    "debt-recycling",
+    "property-investment",
+    "australia"
+  ],
+  "author": "Rahul Gurjar",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "pg": "^8.11.0",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2",
+    "eslint": "^8.50.0",
+    "prettier": "^3.0.3"
+  }
+}
