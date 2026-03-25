@@ -280,6 +280,78 @@ async function getVersionCount(scenarioId) {
 }
 
 /**
+ * Subscription functions
+ */
+async function updateUserSubscription(userId, subscriptionData) {
+  try {
+    const result = await pool.query(
+      `UPDATE users SET
+        stripe_customer_id = $2,
+        subscription_id = $3,
+        subscription_tier = $4,
+        subscription_status = $5,
+        current_period_end = $6,
+        default_payment_method_id = $7
+       WHERE id = $1
+       RETURNING stripe_customer_id, subscription_id, subscription_tier, subscription_status`,
+      [
+        userId,
+        subscriptionData.stripe_customer_id,
+        subscriptionData.subscription_id,
+        subscriptionData.subscription_tier,
+        subscriptionData.subscription_status,
+        subscriptionData.current_period_end,
+        subscriptionData.default_payment_method_id,
+      ]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error updating user subscription:', error);
+    throw error;
+  }
+}
+
+/**
+ * Email logging functions
+ */
+async function createEmailLog(emailData) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO email_logs (user_id, recipient_email, subject, html_body, text_body, status, error_reason, ses_message_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, created_at`,
+      [
+        emailData.user_id,
+        emailData.recipient_email,
+        emailData.subject,
+        emailData.html_body,
+        emailData.text_body,
+        emailData.status,
+        emailData.error_reason || null,
+        emailData.ses_message_id || null,
+      ]
+    );
+    return { id: result.rows[0].id, ...emailData };
+  } catch (error) {
+    console.error('Error creating email log:', error);
+    throw error;
+  }
+}
+
+async function getEmailLog(emailId) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM email_logs WHERE id = $1',
+      [emailId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting email log:', error);
+    throw error;
+  }
+}
+
+/**
  * Health check - test database connection
  */
 async function healthCheck() {
@@ -307,4 +379,7 @@ module.exports = {
   getScenarioVersions,
   getScenarioVersion,
   getVersionCount,
+  updateUserSubscription,
+  createEmailLog,
+  getEmailLog,
 };
