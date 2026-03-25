@@ -216,6 +216,70 @@ async function getAndVerifyResetToken(resetToken) {
 }
 
 /**
+ * Scenario Versioning Functions
+ */
+
+async function createScenarioVersion(scenarioId, parameters, userId) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO scenario_versions (scenario_id, parameters, created_by)
+       VALUES ($1, $2, $3)
+       RETURNING id, scenario_id, parameters, created_by, created_at`,
+      [scenarioId, JSON.stringify(parameters), userId]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error creating scenario version:', error);
+    throw error;
+  }
+}
+
+async function getScenarioVersions(scenarioId, limit = 50, offset = 0) {
+  try {
+    const result = await pool.query(
+      `SELECT id, scenario_id, parameters, created_by, created_at
+       FROM scenario_versions
+       WHERE scenario_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [scenarioId, limit, offset]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching scenario versions:', error);
+    throw error;
+  }
+}
+
+async function getScenarioVersion(versionId) {
+  try {
+    const result = await pool.query(
+      `SELECT id, scenario_id, parameters, created_by, created_at
+       FROM scenario_versions
+       WHERE id = $1`,
+      [versionId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error fetching scenario version:', error);
+    throw error;
+  }
+}
+
+async function getVersionCount(scenarioId) {
+  try {
+    const result = await pool.query(
+      'SELECT COUNT(*) as count FROM scenario_versions WHERE scenario_id = $1',
+      [scenarioId]
+    );
+    return parseInt(result.rows[0].count, 10);
+  } catch (error) {
+    console.error('Error getting version count:', error);
+    throw error;
+  }
+}
+
+/**
  * Health check - test database connection
  */
 async function healthCheck() {
@@ -239,4 +303,8 @@ module.exports = {
   updateUserPassword,
   addResetToken,
   getAndVerifyResetToken,
+  createScenarioVersion,
+  getScenarioVersions,
+  getScenarioVersion,
+  getVersionCount,
 };

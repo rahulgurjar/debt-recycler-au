@@ -10,7 +10,7 @@
 const express = require('express');
 const cors = require('cors');
 const { calculate } = require('./calculator');
-const { saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken } = require('./db');
+const { saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken, createScenarioVersion, getScenarioVersions, getScenarioVersion, getVersionCount } = require('./db');
 const { validateEmail, validatePassword, hashPassword, comparePassword, generateToken, verifyToken, generateResetToken, RESET_TOKEN_EXPIRY } = require('./auth');
 
 const app = express();
@@ -598,13 +598,17 @@ app.post('/scenarios', authMiddleware, async (req, res) => {
       [client_id, name, params.initial_outlay, params.gearing_ratio, params.initial_loan, params.annual_investment, params.inflation, params.loc_interest_rate, params.etf_dividend_rate, params.etf_capital_appreciation, params.marginal_tax, projection.final_wealth, projection.xirr]
     );
 
+    const scenarioId = scenarioRes.rows[0].id;
+
     for (const year of projection.years) {
       await pool.query(
         `INSERT INTO projections (scenario_id, year, date, pf_value, loan, wealth, dividend, loc_interest, taxable_dividend, after_tax_dividend, pf_value_30_june, wealth_30_june, gearing)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-        [scenarioRes.rows[0].id, year.year, year.date, year.pf_value, year.loan, year.wealth, year.dividend || 0, year.loc_interest || 0, year.taxable_dividend || 0, year.after_tax_dividend || 0, year.pf_value_30_june || 0, year.wealth_30_june || 0, year.gearing || 0]
+        [scenarioId, year.year, year.date, year.pf_value, year.loan, year.wealth, year.dividend || 0, year.loc_interest || 0, year.taxable_dividend || 0, year.after_tax_dividend || 0, year.pf_value_30_june || 0, year.wealth_30_june || 0, year.gearing || 0]
       );
     }
+
+    await createScenarioVersion(scenarioId, params, req.user.userId);
 
     res.status(201).json({
       scenario: scenarioRes.rows[0],
@@ -633,8 +637,11 @@ app.get('/scenarios/:id', authMiddleware, async (req, res) => {
       [req.params.id]
     );
 
+    const versionCount = await getVersionCount(req.params.id);
+
     const scenario = scenarioRes.rows[0];
     scenario.projections = projectionsRes.rows;
+    scenario.version_count = versionCount;
 
     res.json({ scenario });
   } catch (error) {
@@ -730,6 +737,8 @@ app.patch('/scenarios/:id', authMiddleware, async (req, res) => {
       );
     }
 
+    await createScenarioVersion(req.params.id, params, req.user.userId);
+
     res.json({
       scenario: { id: req.params.id, ...params, final_wealth: projection.final_wealth, xirr: projection.xirr },
       projection,
@@ -752,6 +761,158 @@ app.delete('/scenarios/:id', authMiddleware, async (req, res) => {
     }
 
     res.json({ message: 'Scenario deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/scenarios/:id/versions', authMiddleware, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+
+    const scenarioRes = await pool.query(
+      `SELECT s.id FROM scenarios s
+       JOIN clients c ON s.client_id = c.id
+       WHERE s.id = $1 AND c.customer_id = $2`,
+      [req.params.id, req.user.userId]
+    );
+
+    if (scenarioRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+
+    const versions = await getScenarioVersions(req.params.id, limit, offset);
+
+    versions.forEach(v => {
+      v.parameters = JSON.parse(v.parameters);
+    });
+
+    res.json({ versions });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/scenarios/:id/versions/:versionId', authMiddleware, async (req, res) => {
+  try {
+    const scenarioRes = await pool.query(
+      `SELECT s.id FROM scenarios s
+       JOIN clients c ON s.client_id = c.id
+       WHERE s.id = $1 AND c.customer_id = $2`,
+      [req.params.id, req.user.userId]
+    );
+
+    if (scenarioRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+
+    const version = await getScenarioVersion(req.params.versionId);
+
+    if (!version || version.scenario_id !== parseInt(req.params.id, 10)) {
+      return res.status(404).json({ error: 'Version not found' });
+    }
+
+    version.parameters = JSON.parse(version.parameters);
+
+    res.json({ version });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/scenarios/:id/versions/compare', authMiddleware, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    if (!from || !to) {
+      return res.status(400).json({ error: 'from and to parameters required' });
+    }
+
+    const scenarioRes = await pool.query(
+      `SELECT s.id FROM scenarios s
+       JOIN clients c ON s.client_id = c.id
+       WHERE s.id = $1 AND c.customer_id = $2`,
+      [req.params.id, req.user.userId]
+    );
+
+    if (scenarioRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+
+    const versionFrom = await getScenarioVersion(from);
+    const versionTo = await getScenarioVersion(to);
+
+    if (!versionFrom || !versionTo || versionFrom.scenario_id !== parseInt(req.params.id, 10) || versionTo.scenario_id !== parseInt(req.params.id, 10)) {
+      return res.status(404).json({ error: 'One or both versions not found' });
+    }
+
+    const paramsFrom = JSON.parse(versionFrom.parameters);
+    const paramsTo = JSON.parse(versionTo.parameters);
+
+    const changes = [];
+    const allKeys = new Set([...Object.keys(paramsFrom), ...Object.keys(paramsTo)]);
+
+    allKeys.forEach(key => {
+      if (paramsFrom[key] !== paramsTo[key]) {
+        changes.push({
+          field: key,
+          old_value: paramsFrom[key],
+          new_value: paramsTo[key],
+        });
+      }
+    });
+
+    res.json({ changes });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/scenarios/:id/versions/:versionId/restore', authMiddleware, async (req, res) => {
+  try {
+    const scenarioRes = await pool.query(
+      `SELECT s.* FROM scenarios s
+       JOIN clients c ON s.client_id = c.id
+       WHERE s.id = $1 AND c.customer_id = $2`,
+      [req.params.id, req.user.userId]
+    );
+
+    if (scenarioRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+
+    const version = await getScenarioVersion(req.params.versionId);
+
+    if (!version || version.scenario_id !== parseInt(req.params.id, 10)) {
+      return res.status(404).json({ error: 'Version not found' });
+    }
+
+    const params = JSON.parse(version.parameters);
+
+    const projection = calculate(params);
+
+    await pool.query(
+      `UPDATE scenarios SET initial_outlay = $1, gearing_ratio = $2, initial_loan = $3, annual_investment = $4, inflation = $5, loc_interest_rate = $6, etf_dividend_rate = $7, etf_capital_appreciation = $8, marginal_tax = $9, final_wealth = $10, xirr = $11 WHERE id = $12`,
+      [params.initial_outlay, params.gearing_ratio, params.initial_loan, params.annual_investment, params.inflation, params.loc_interest_rate, params.etf_dividend_rate, params.etf_capital_appreciation, params.marginal_tax, projection.final_wealth, projection.xirr, req.params.id]
+    );
+
+    await pool.query('DELETE FROM projections WHERE scenario_id = $1', [req.params.id]);
+
+    for (const year of projection.years) {
+      await pool.query(
+        `INSERT INTO projections (scenario_id, year, date, pf_value, loan, wealth, dividend, loc_interest, taxable_dividend, after_tax_dividend, pf_value_30_june, wealth_30_june, gearing)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [req.params.id, year.year, year.date, year.pf_value, year.loan, year.wealth, year.dividend || 0, year.loc_interest || 0, year.taxable_dividend || 0, year.after_tax_dividend || 0, year.pf_value_30_june || 0, year.wealth_30_june || 0, year.gearing || 0]
+      );
+    }
+
+    await createScenarioVersion(req.params.id, params, req.user.userId);
+
+    res.json({
+      scenario: { id: req.params.id, ...params, final_wealth: projection.final_wealth, xirr: projection.xirr },
+      projection,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
