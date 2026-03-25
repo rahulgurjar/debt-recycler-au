@@ -8,7 +8,7 @@
  * Verifies all V1-V5 requirements from spec/01_authentication.md
  */
 
-const { Browser } = require("puppeteer");
+const puppeteer = require("puppeteer");
 
 const PRODUCTION_URL = process.env.PRODUCTION_URL || "https://d1p3am5bl1sho7.cloudfront.net";
 const SCREENSHOTS_DIR = "./verification-evidence";
@@ -32,7 +32,7 @@ class AuthProductionVerification {
     console.log(`⏱️  Timestamp: ${new Date().toISOString()}\n`);
 
     try {
-      this.browser = await Browser.launch();
+      this.browser = await puppeteer.launch();
       this.page = await this.browser.newPage();
 
       // Capture console logs and network activity

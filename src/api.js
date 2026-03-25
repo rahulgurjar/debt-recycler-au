@@ -12,7 +12,7 @@ const cors = require('cors');
 const { calculate } = require('./calculator');
 const { saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken, createScenarioVersion, getScenarioVersions, getScenarioVersion, getVersionCount } = require('./db');
 const { validateEmail, validatePassword, hashPassword, comparePassword, generateToken, verifyToken, generateResetToken, RESET_TOKEN_EXPIRY } = require('./auth');
-const { generatePDFReport, saveReportToDatabase, uploadPDFToS3 } = require('./report');
+// const { generatePDFReport, saveReportToDatabase, uploadPDFToS3 } = require('./report');
 const { generateExcel } = require('./excel');
 
 const app = express();
@@ -920,6 +920,7 @@ app.post('/scenarios/:id/versions/:versionId/restore', authMiddleware, async (re
   }
 });
 
+/*
 app.post('/scenarios/:id/report', authMiddleware, async (req, res) => {
   try {
     const { title, include_company_branding } = req.body;
@@ -1001,6 +1002,7 @@ app.post('/scenarios/:id/report', authMiddleware, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+*/
 
 /**
  * POST /scenarios/:id/export
