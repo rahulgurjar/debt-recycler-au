@@ -75,6 +75,15 @@ CREATE TABLE IF NOT EXISTS scenario_versions (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS scenario_reports (
+  id SERIAL PRIMARY KEY,
+  scenario_id INTEGER REFERENCES scenarios(id) ON DELETE CASCADE,
+  filename VARCHAR(255) NOT NULL,
+  s3_url VARCHAR(512),
+  created_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
 CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(reset_token);
@@ -84,3 +93,5 @@ CREATE INDEX IF NOT EXISTS idx_scenarios_client ON scenarios(client_id);
 CREATE INDEX IF NOT EXISTS idx_projections_scenario ON projections(scenario_id);
 CREATE INDEX IF NOT EXISTS idx_scenario_versions_scenario ON scenario_versions(scenario_id);
 CREATE INDEX IF NOT EXISTS idx_scenario_versions_created ON scenario_versions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scenario_reports_scenario ON scenario_reports(scenario_id);
+CREATE INDEX IF NOT EXISTS idx_scenario_reports_created ON scenario_reports(created_at DESC);

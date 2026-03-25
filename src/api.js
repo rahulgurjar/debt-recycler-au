@@ -12,6 +12,7 @@ const cors = require('cors');
 const { calculate } = require('./calculator');
 const { saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken, createScenarioVersion, getScenarioVersions, getScenarioVersion, getVersionCount } = require('./db');
 const { validateEmail, validatePassword, hashPassword, comparePassword, generateToken, verifyToken, generateResetToken, RESET_TOKEN_EXPIRY } = require('./auth');
+const { generatePDFReport, saveReportToDatabase, uploadPDFToS3 } = require('./report');
 
 const app = express();
 app.use(cors());
@@ -912,6 +913,88 @@ app.post('/scenarios/:id/versions/:versionId/restore', authMiddleware, async (re
     res.json({
       scenario: { id: req.params.id, ...params, final_wealth: projection.final_wealth, xirr: projection.xirr },
       projection,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/scenarios/:id/report', authMiddleware, async (req, res) => {
+  try {
+    const { title, include_company_branding } = req.body;
+
+    const scenarioRes = await pool.query(
+      `SELECT s.*, c.id as client_id, c.name, c.email, c.risk_profile
+       FROM scenarios s
+       JOIN clients c ON s.client_id = c.id
+       WHERE s.id = $1 AND c.customer_id = $2`,
+      [req.params.id, req.user.userId]
+    );
+
+    if (scenarioRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+
+    const scenario = scenarioRes.rows[0];
+    const client = {
+      id: scenario.client_id,
+      name: scenario.name,
+      email: scenario.email,
+      risk_profile: scenario.risk_profile,
+    };
+
+    const userRes = await pool.query(
+      'SELECT company_name FROM users WHERE id = $1',
+      [req.user.userId]
+    );
+
+    const companyName = userRes.rows[0]?.company_name;
+
+    const options = {
+      title: title || 'Debt Recycling Strategy Report',
+      include_company_branding: include_company_branding || false,
+      company_name: companyName,
+    };
+
+    const pdfBuffer = await generatePDFReport(scenario, client, options);
+
+    const filename = `scenario_${scenario.id}_${Date.now()}.pdf`;
+
+    const s3Url = await uploadPDFToS3(pdfBuffer, filename);
+
+    const reportRecord = await saveReportToDatabase(scenario.id, filename, s3Url, req.user.userId);
+
+    const taxTotal = scenario.marginal_tax * 10000;
+
+    res.json({
+      report_id: reportRecord.id,
+      filename: reportRecord.filename,
+      s3_url: reportRecord.s3_url || `file://${filename}`,
+      metadata: {
+        client_name: client.name,
+        scenario_name: scenario.name,
+        generated_date: new Date().toISOString(),
+        strategy_summary: {
+          initial_outlay: scenario.initial_outlay,
+          loan_amount: scenario.initial_loan,
+          gearing_ratio: scenario.gearing_ratio,
+          annual_investment: scenario.annual_investment,
+        },
+        projection_summary: {
+          final_wealth: scenario.final_wealth,
+          xirr: scenario.xirr,
+          total_tax: taxTotal,
+          total_investment: scenario.initial_outlay + scenario.annual_investment * 20,
+        },
+        tax_summary: {
+          total_tax: taxTotal,
+          marginal_tax_rate: scenario.marginal_tax,
+        },
+        disclaimer_text: 'This report is not financial advice. The projections contained herein are based on assumptions and historical data and may not be indicative of future performance. Investors should consult with a licensed financial advisor before making investment decisions.',
+        includes_disclaimer: true,
+        title: options.title,
+        company_name: companyName,
+      },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
