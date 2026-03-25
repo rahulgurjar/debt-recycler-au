@@ -322,6 +322,239 @@ app.get('/auth/debug/user', async (req, res) => {
   res.json(user);
 });
 
+// Client Management Endpoints
+
+app.post('/clients', authMiddleware, async (req, res) => {
+  try {
+    const { name, email, dob, annual_income, risk_profile } = req.body;
+
+    if (!name || !email || !dob || !annual_income || !risk_profile) {
+      return res.status(400).json({ error: 'All fields required' });
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+      return res.status(400).json({ error: 'Invalid DOB format (YYYY-MM-DD)' });
+    }
+
+    if (annual_income < 0) {
+      return res.status(400).json({ error: 'Income must be non-negative' });
+    }
+
+    if (!['conservative', 'moderate', 'aggressive'].includes(risk_profile)) {
+      return res.status(400).json({ error: 'Invalid risk profile' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO clients (customer_id, name, email, dob, annual_income, risk_profile)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, name, email, dob, annual_income, risk_profile`,
+      [req.user.userId, name, email, new Date(dob), annual_income, risk_profile]
+    );
+
+    res.status(201).json({ client: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/clients', authMiddleware, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+    const sort = req.query.sort || 'created_at';
+    const order = req.query.order || 'DESC';
+    const riskProfile = req.query.risk_profile;
+
+    let whereClause = 'customer_id = $1';
+    const params = [req.user.userId];
+
+    if (riskProfile) {
+      whereClause += ' AND risk_profile = $2';
+      params.push(riskProfile);
+    }
+
+    const countRes = await pool.query(
+      `SELECT COUNT(*) FROM clients WHERE ${whereClause}`,
+      params
+    );
+
+    const clientRes = await pool.query(
+      `SELECT id, name, email, dob, annual_income, risk_profile, created_at FROM clients
+       WHERE ${whereClause}
+       ORDER BY ${sort} ${order}
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
+    );
+
+    res.json({
+      clients: clientRes.rows,
+      total: parseInt(countRes.rows[0].count),
+      limit,
+      offset,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/clients/:id', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM clients WHERE id = $1 AND customer_id = $2',
+      [req.params.id, req.user.userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    res.json({ client: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/clients/:id', authMiddleware, async (req, res) => {
+  try {
+    const { name, email, annual_income, risk_profile } = req.body;
+
+    const fields = [];
+    const values = [];
+    let paramIdx = 1;
+
+    if (name) {
+      fields.push(`name = $${paramIdx++}`);
+      values.push(name);
+    }
+    if (email) {
+      fields.push(`email = $${paramIdx++}`);
+      values.push(email);
+    }
+    if (annual_income !== undefined) {
+      if (annual_income < 0) {
+        return res.status(400).json({ error: 'Income must be non-negative' });
+      }
+      fields.push(`annual_income = $${paramIdx++}`);
+      values.push(annual_income);
+    }
+    if (risk_profile) {
+      if (!['conservative', 'moderate', 'aggressive'].includes(risk_profile)) {
+        return res.status(400).json({ error: 'Invalid risk profile' });
+      }
+      fields.push(`risk_profile = $${paramIdx++}`);
+      values.push(risk_profile);
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    values.push(req.params.id);
+    values.push(req.user.userId);
+
+    const result = await pool.query(
+      `UPDATE clients SET ${fields.join(', ')} WHERE id = $${paramIdx++} AND customer_id = $${paramIdx++}
+       RETURNING id, name, email, dob, annual_income, risk_profile`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    res.json({ client: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/clients/:id', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM clients WHERE id = $1 AND customer_id = $2',
+      [req.params.id, req.user.userId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    res.json({ message: 'Client deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/clients/import', authMiddleware, async (req, res) => {
+  try {
+    const { csv } = req.body;
+
+    if (!csv) {
+      return res.status(400).json({ error: 'CSV data required' });
+    }
+
+    const lines = csv.trim().split('\n');
+    const headers = lines[0].split(',').map(h => h.trim());
+
+    const requiredHeaders = ['name', 'email', 'dob', 'annual_income', 'risk_profile'];
+    if (!requiredHeaders.every(h => headers.includes(h))) {
+      return res.status(400).json({ error: 'Missing required CSV headers' });
+    }
+
+    const errors = [];
+    let imported = 0;
+
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',').map(v => v.trim());
+      const row = {};
+      headers.forEach((h, idx) => {
+        row[h] = values[idx];
+      });
+
+      if (!row.name || !row.email || !row.dob || !row.annual_income || !row.risk_profile) {
+        errors.push({ row: i + 1, error: 'Missing required fields' });
+        continue;
+      }
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(row.dob)) {
+        errors.push({ row: i + 1, error: 'Invalid DOB format' });
+        continue;
+      }
+
+      if (isNaN(row.annual_income) || row.annual_income < 0) {
+        errors.push({ row: i + 1, error: 'Invalid income' });
+        continue;
+      }
+
+      if (!['conservative', 'moderate', 'aggressive'].includes(row.risk_profile)) {
+        errors.push({ row: i + 1, error: 'Invalid risk profile' });
+        continue;
+      }
+
+      try {
+        await pool.query(
+          `INSERT INTO clients (customer_id, name, email, dob, annual_income, risk_profile)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [req.user.userId, row.name, row.email, new Date(row.dob), row.annual_income, row.risk_profile]
+        );
+        imported++;
+      } catch (error) {
+        errors.push({ row: i + 1, error: error.message });
+      }
+    }
+
+    const status = errors.length === 0 ? 200 : 207;
+    const response = { imported };
+    if (errors.length > 0) {
+      response.errors = errors;
+    }
+
+    res.status(status).json(response);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /**
  * POST /api/calculate
  * Calculate debt recycling projection for given parameters

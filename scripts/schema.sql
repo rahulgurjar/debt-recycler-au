@@ -19,9 +19,21 @@ CREATE TABLE IF NOT EXISTS password_resets (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS clients (
+  id SERIAL PRIMARY KEY,
+  customer_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  email VARCHAR(255),
+  dob DATE,
+  annual_income DECIMAL(12, 2),
+  risk_profile VARCHAR(50),
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS scenarios (
   id SERIAL PRIMARY KEY,
-  user_id VARCHAR(255),
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
@@ -58,5 +70,7 @@ CREATE TABLE IF NOT EXISTS projections (
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
 CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(reset_token);
+CREATE INDEX IF NOT EXISTS idx_clients_customer ON clients(customer_id);
 CREATE INDEX IF NOT EXISTS idx_scenarios_user ON scenarios(user_id);
+CREATE INDEX IF NOT EXISTS idx_scenarios_client ON scenarios(client_id);
 CREATE INDEX IF NOT EXISTS idx_projections_scenario ON projections(scenario_id);
