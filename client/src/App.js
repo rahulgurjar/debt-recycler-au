@@ -1,26 +1,72 @@
-import React, { useState } from 'react';
-import axios from 'axios';
+import React, { useState, useEffect } from 'react';
 import Dashboard from './components/Dashboard';
 import ScenarioList from './components/ScenarioList';
 import Tutorial from './components/Tutorial';
+import Login from './components/Login';
+import Signup from './components/Signup';
 import './App.css';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
-
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authPage, setAuthPage] = useState('login');
   const [activeTab, setActiveTab] = useState('calculator');
-  const [scenarios, setScenarios] = useState([]);
-  const [refreshScenarios, setRefreshScenarios] = useState(false);
+  const [user, setUser] = useState(null);
 
-  const handleCalculationComplete = () => {
-    setRefreshScenarios(!refreshScenarios);
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const savedUser = localStorage.getItem('user');
+    if (token && savedUser) {
+      setIsAuthenticated(true);
+      setUser(JSON.parse(savedUser));
+    }
+  }, []);
+
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true);
+    setActiveTab('calculator');
   };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setIsAuthenticated(false);
+    setAuthPage('login');
+    setUser(null);
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <>
+        {authPage === 'login' ? (
+          <Login
+            onLoginSuccess={handleLoginSuccess}
+            onSwitchToSignup={() => setAuthPage('signup')}
+          />
+        ) : (
+          <Signup
+            onSignupSuccess={handleLoginSuccess}
+            onSwitchToLogin={() => setAuthPage('login')}
+          />
+        )}
+      </>
+    );
+  }
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Debt Recycling Calculator</h1>
-        <p>20-Year Wealth Projection for Australian Investors</p>
+        <div className="header-content">
+          <div>
+            <h1>Debt Recycling Dashboard</h1>
+            <p>20-Year Wealth Projection for Australian Investors</p>
+          </div>
+          <div className="header-user">
+            <span className="user-name">{user?.email}</span>
+            <button className="logout-btn" onClick={handleLogout}>
+              Logout
+            </button>
+          </div>
+        </div>
       </header>
 
       <nav className="app-nav">
@@ -40,24 +86,18 @@ function App() {
           className={`nav-btn ${activeTab === 'tutorial' ? 'active' : ''}`}
           onClick={() => setActiveTab('tutorial')}
         >
-          Tutorial & Specs
+          Tutorial & Verification
         </button>
       </nav>
 
       <main className="app-main">
-        {activeTab === 'calculator' && (
-          <Dashboard onCalculationComplete={handleCalculationComplete} />
-        )}
-        {activeTab === 'scenarios' && (
-          <ScenarioList refresh={refreshScenarios} />
-        )}
-        {activeTab === 'tutorial' && (
-          <Tutorial />
-        )}
+        {activeTab === 'calculator' && <Dashboard />}
+        {activeTab === 'scenarios' && <ScenarioList />}
+        {activeTab === 'tutorial' && <Tutorial />}
       </main>
 
       <footer className="app-footer">
-        <p>&copy; 2026 Debt Recycler AU | Powered by React + Node.js</p>
+        <p>&copy; 2026 Debt Recycler AU | Financial Advisor Tools for Australian Investors</p>
       </footer>
     </div>
   );
