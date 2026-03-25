@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "chrome": {
+      "command": "npx",
+      "args": [
+        "@anthropics/mcp-server-chrome"
+      ],
+      "description": "Chrome DevTools Protocol server for browser automation and testing"
+    }
+  }
+}
