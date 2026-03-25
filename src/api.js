@@ -50,9 +50,10 @@ app.post('/api/calculate', (req, res) => {
     };
 
     const result = calculate(params);
-    
+
     res.json({
       success: true,
+      years: result.years,
       projection: result.years,
       final_wealth: result.final_wealth,
       xirr: result.xirr,
