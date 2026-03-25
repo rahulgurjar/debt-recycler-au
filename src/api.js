@@ -202,9 +202,112 @@ app.post('/workspace/users', authMiddleware, adminMiddleware, async (req, res) =
   }
 });
 
+app.get('/workspace', authMiddleware, async (req, res) => {
+  try {
+    const workspace = await pool.query(
+      'SELECT id, email, company_name, role FROM users WHERE id = $1',
+      [req.user.userId]
+    );
+    if (!workspace.rows[0]) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+    const user = workspace.rows[0];
+    const teamRes = await pool.query(
+      'SELECT id, email, role FROM users WHERE company_name = (SELECT company_name FROM users WHERE id = $1)',
+      [req.user.userId]
+    );
+    res.json({
+      id: user.id,
+      company_name: user.company_name,
+      subscription_tier: 'starter',
+      team_members: teamRes.rows,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/workspace/users/:userId', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { role } = req.body;
+
+    if (!['admin', 'advisor', 'client'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    const result = await pool.query(
+      'UPDATE users SET role = $1 WHERE id = $2 RETURNING id, email, role',
+      [role, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/workspace/users/:userId', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const result = await pool.query(
+      'DELETE FROM users WHERE id = $1 RETURNING id',
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ message: 'User removed from workspace' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/workspace/settings', authMiddleware, async (req, res) => {
+  try {
+    res.json({
+      subscription_tier: 'starter',
+      monthly_price: 500,
+      max_clients: 10,
+      features: {
+        scenarios: 3,
+        team_members: 2,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.patch('/workspace/settings', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    res.json({ message: 'Settings updated' });
+    const { subscription_tier } = req.body;
+
+    if (!['starter', 'professional', 'enterprise'].includes(subscription_tier)) {
+      return res.status(400).json({ error: 'Invalid subscription tier' });
+    }
+
+    const tierConfig = {
+      starter: { price: 500, clients: 10 },
+      professional: { price: 1500, clients: 50 },
+      enterprise: { price: 3000, clients: 999999 },
+    };
+
+    const config = tierConfig[subscription_tier];
+
+    res.json({
+      subscription_tier,
+      monthly_price: config.price,
+      max_clients: config.clients,
+      message: 'Settings updated',
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
