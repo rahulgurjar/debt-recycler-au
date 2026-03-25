@@ -10,11 +10,33 @@
 const express = require('express');
 const cors = require('cors');
 const { calculate } = require('./calculator');
-const { saveScenario, getScenarios, getScenario, deleteScenario, healthCheck } = require('./db');
+const { saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken } = require('./db');
+const { validateEmail, validatePassword, hashPassword, comparePassword, generateToken, verifyToken, generateResetToken, RESET_TOKEN_EXPIRY } = require('./auth');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Auth middleware
+const authMiddleware = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+  const decoded = verifyToken(token);
+  if (!decoded) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+  req.user = decoded;
+  next();
+};
+
+const adminMiddleware = (req, res, next) => {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
 
 // Health check
 app.get('/health', async (req, res) => {
@@ -31,6 +53,170 @@ app.get('/health', async (req, res) => {
       error: error.message,
     });
   }
+});
+
+// Auth Endpoints
+
+app.post('/auth/signup', async (req, res) => {
+  try {
+    const { email, password, company_name } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    if (!validateEmail(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    if (!validatePassword(password)) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
+    const existingUser = await getUserByEmail(email);
+    if (existingUser) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+
+    const passwordHash = await hashPassword(password);
+    const user = await createUser(email, passwordHash, company_name || 'Company');
+
+    const token = generateToken(user.id, user.email, 'admin');
+
+    res.status(201).json({
+      user: { id: user.id, email: user.email, company_name: user.company_name },
+      token,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    const user = await getUserByEmail(email);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const isValid = await comparePassword(password, user.password_hash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const token = generateToken(user.id, user.email, user.role);
+
+    res.json({
+      user: { id: user.id, email: user.email, company_name: user.company_name, role: user.role },
+      token,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/auth/logout', authMiddleware, (req, res) => {
+  res.json({ message: 'Logged out successfully' });
+});
+
+app.get('/auth/me', authMiddleware, async (req, res) => {
+  try {
+    const user = await getUserByEmail(req.user.email);
+    res.json({ email: user.email, id: user.id, role: user.role });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const user = await getUserByEmail(email);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const resetToken = generateResetToken();
+    await addResetToken(user.id, resetToken, Date.now() + RESET_TOKEN_EXPIRY);
+
+    res.json({ message: 'Password reset email sent', reset_token: resetToken });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/auth/reset-password', async (req, res) => {
+  try {
+    const { reset_token, new_password } = req.body;
+
+    if (!validatePassword(new_password)) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
+    const resetRecord = await getAndVerifyResetToken(reset_token);
+    if (!resetRecord) {
+      return res.status(400).json({ error: 'Invalid or expired reset token' });
+    }
+
+    const passwordHash = await hashPassword(new_password);
+    await updateUserPassword(resetRecord.user_id, passwordHash);
+
+    res.json({ message: 'Password reset successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Workspace endpoints
+
+app.post('/workspace/users', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { email, role } = req.body;
+
+    if (!email || !role) {
+      return res.status(400).json({ error: 'Email and role required' });
+    }
+
+    const existingUser = await getUserByEmail(email);
+    if (existingUser) {
+      return res.status(409).json({ error: 'User already exists' });
+    }
+
+    const tempPassword = Math.random().toString(36).slice(-12);
+    const passwordHash = await hashPassword(tempPassword);
+    const user = await createUser(email, passwordHash, req.user.company_name || 'Company', role);
+
+    res.status(201).json({
+      user: { id: user.id, email: user.email, role: user.role },
+      temporary_password: tempPassword,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/workspace/settings', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    res.json({ message: 'Settings updated' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug endpoint (for testing only, remove in production)
+app.get('/auth/debug/user', async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  const user = await getUserByEmail(email);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json(user);
 });
 
 /**

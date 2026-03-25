@@ -1,6 +1,24 @@
 -- Debt Recycler AU Database Schema
 -- PostgreSQL tables for scenarios and projections
 
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  company_name VARCHAR(255),
+  role VARCHAR(50) DEFAULT 'advisor',
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  reset_token VARCHAR(255) UNIQUE NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS scenarios (
   id SERIAL PRIMARY KEY,
   user_id VARCHAR(255),
@@ -37,5 +55,8 @@ CREATE TABLE IF NOT EXISTS projections (
   gearing DECIMAL(5, 4)
 );
 
-CREATE INDEX idx_scenarios_user ON scenarios(user_id);
-CREATE INDEX idx_projections_scenario ON projections(scenario_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(reset_token);
+CREATE INDEX IF NOT EXISTS idx_scenarios_user ON scenarios(user_id);
+CREATE INDEX IF NOT EXISTS idx_projections_scenario ON projections(scenario_id);

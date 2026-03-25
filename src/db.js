@@ -145,6 +145,77 @@ async function deleteScenario(scenarioId) {
 }
 
 /**
+ * User Management Functions
+ */
+
+async function createUser(email, passwordHash, companyName = 'Company', role = 'admin') {
+  try {
+    const result = await pool.query(
+      `INSERT INTO users (email, password_hash, company_name, role)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, email, password_hash, company_name, role`,
+      [email, passwordHash, companyName, role]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error creating user:', error);
+    throw error;
+  }
+}
+
+async function getUserByEmail(email) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    throw error;
+  }
+}
+
+async function updateUserPassword(userId, passwordHash) {
+  try {
+    await pool.query(
+      'UPDATE users SET password_hash = $1 WHERE id = $2',
+      [passwordHash, userId]
+    );
+  } catch (error) {
+    console.error('Error updating password:', error);
+    throw error;
+  }
+}
+
+async function addResetToken(userId, resetToken, expiryTime) {
+  try {
+    await pool.query(
+      `INSERT INTO password_resets (user_id, reset_token, expires_at)
+       VALUES ($1, $2, to_timestamp($3/1000.0))`,
+      [userId, resetToken, expiryTime]
+    );
+  } catch (error) {
+    console.error('Error adding reset token:', error);
+    throw error;
+  }
+}
+
+async function getAndVerifyResetToken(resetToken) {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM password_resets
+       WHERE reset_token = $1 AND expires_at > NOW()`,
+      [resetToken]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error verifying reset token:', error);
+    throw error;
+  }
+}
+
+/**
  * Health check - test database connection
  */
 async function healthCheck() {
@@ -163,4 +234,9 @@ module.exports = {
   getScenario,
   deleteScenario,
   healthCheck,
+  createUser,
+  getUserByEmail,
+  updateUserPassword,
+  addResetToken,
+  getAndVerifyResetToken,
 };
