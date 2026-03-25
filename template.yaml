@@ -32,6 +32,11 @@ Parameters:
     Description: RDS database password
     MinLength: 8
 
+  ACMCertificateArn:
+    Type: String
+    Description: ARN of ACM certificate for CloudFront (optional - use for HTTPS)
+    Default: ''
+
 Resources:
   # Lambda Function - API Handler
   DebtRecyclerFunction:
@@ -88,6 +93,81 @@ Resources:
       EnableCloudwatchLogsExports:
         - postgresql
 
+  # S3 Bucket for Frontend (Private, accessed via CloudFront)
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'debt-recycler-frontend-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Origin Access Control for CloudFront to S3
+  FrontendOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: debt-recycler-frontend-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # S3 Bucket Policy allowing CloudFront access
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyText:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
+
+  # CloudFront Distribution for Frontend
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Debt Recycler AU Frontend Distribution
+        DefaultRootObject: index.html
+        Origins:
+          - Id: FrontendS3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+            OriginAccessControlId: !GetAtt FrontendOAC.Id
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          DefaultTTL: 86400
+          MaxTTL: 31536000
+          MinTTL: 0
+          Compress: true
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+
 Outputs:
   RDSEndpoint:
     Description: RDS database endpoint
@@ -100,3 +180,15 @@ Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint (check CloudFormation Outputs for ServerlessApi)
     Value: Check AWS CloudFormation stack outputs or Lambda function test event for API Gateway endpoint
+
+  FrontendBucketName:
+    Description: S3 bucket for frontend assets
+    Value: !Ref FrontendBucket
+
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID for cache invalidation
+    Value: !Ref FrontendDistribution
+
+  CloudFrontURL:
+    Description: CloudFront distribution URL (HTTPS)
+    Value: !Sub 'https://${FrontendDistribution.DomainName}'

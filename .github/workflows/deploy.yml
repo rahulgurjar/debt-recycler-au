@@ -71,8 +71,6 @@ jobs:
           npm install
           npm run build
           cd ..
-          mkdir -p dist/public
-          cp -r client/build/* dist/public/
 
       - name: Deploy with CloudFormation
         run: |
@@ -90,6 +88,31 @@ jobs:
           aws cloudformation describe-stacks \
             --stack-name debt-recycler-au \
             --query 'Stacks[0].Outputs' \
+            --region ${{ env.AWS_REGION }} > stack-outputs.json
+          cat stack-outputs.json
+
+      - name: Deploy frontend to S3
+        run: |
+          BUCKET=$(jq -r '.[] | select(.OutputKey=="FrontendBucketName") | .OutputValue' stack-outputs.json)
+          echo "Syncing frontend to S3 bucket: $BUCKET"
+          aws s3 sync client/build/ s3://$BUCKET/ \
+            --delete \
+            --cache-control "max-age=86400" \
+            --region ${{ env.AWS_REGION }}
+
+          # Set cache-control to no-cache for index.html
+          aws s3 cp client/build/index.html s3://$BUCKET/index.html \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --content-type "text/html" \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Invalidate CloudFront cache
+        run: |
+          DISTRIBUTION_ID=$(jq -r '.[] | select(.OutputKey=="CloudFrontDistributionId") | .OutputValue' stack-outputs.json)
+          echo "Invalidating CloudFront distribution: $DISTRIBUTION_ID"
+          aws cloudfront create-invalidation \
+            --distribution-id $DISTRIBUTION_ID \
+            --paths "/*" \
             --region ${{ env.AWS_REGION }}
 
   notify:
