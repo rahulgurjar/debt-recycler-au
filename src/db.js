@@ -280,6 +280,250 @@ async function getVersionCount(scenarioId) {
 }
 
 /**
+ * Email logging functions
+ */
+async function createEmailLog(emailData) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO email_logs (user_id, recipient_email, subject, html_body, text_body, status, error_reason, ses_message_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, created_at`,
+      [
+        emailData.user_id,
+        emailData.recipient_email,
+        emailData.subject,
+        emailData.html_body,
+        emailData.text_body,
+        emailData.status,
+        emailData.error_reason || null,
+        emailData.ses_message_id || null,
+      ]
+    );
+    return { id: result.rows[0].id, ...emailData };
+  } catch (error) {
+    console.error('Error creating email log:', error);
+    throw error;
+  }
+}
+
+async function getEmailLog(emailId) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM email_logs WHERE id = $1',
+      [emailId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting email log:', error);
+    throw error;
+  }
+}
+
+async function createScheduledEmail(scheduleData) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO scheduled_emails (user_id, client_id, scenario_id, scheduled_date, frequency, subject, active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, next_send_date`,
+      [
+        scheduleData.user_id,
+        scheduleData.client_id,
+        scheduleData.scenario_id,
+        scheduleData.scheduled_date,
+        scheduleData.frequency,
+        scheduleData.subject,
+        scheduleData.active !== false,
+      ]
+    );
+    return { id: result.rows[0].id, next_send_date: result.rows[0].next_send_date, ...scheduleData };
+  } catch (error) {
+    console.error('Error creating scheduled email:', error);
+    throw error;
+  }
+}
+
+async function getScheduledEmail(scheduleId) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM scheduled_emails WHERE id = $1',
+      [scheduleId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting scheduled email:', error);
+    throw error;
+  }
+}
+
+async function updateScheduledEmail(scheduleId, updates) {
+  try {
+    const fields = [];
+    const values = [scheduleId];
+    let paramNum = 2;
+
+    if (updates.active !== undefined) {
+      fields.push(`active = $${paramNum}`);
+      values.push(updates.active);
+      paramNum++;
+    }
+    if (updates.next_send_date) {
+      fields.push(`next_send_date = $${paramNum}`);
+      values.push(updates.next_send_date);
+      paramNum++;
+    }
+
+    if (fields.length === 0) return;
+
+    await pool.query(
+      `UPDATE scheduled_emails SET ${fields.join(', ')} WHERE id = $1`,
+      values
+    );
+  } catch (error) {
+    console.error('Error updating scheduled email:', error);
+    throw error;
+  }
+}
+
+async function getScheduledEmailsDue() {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM scheduled_emails WHERE active = true AND next_send_date <= NOW()`,
+    );
+    return result.rows || [];
+  } catch (error) {
+    console.error('Error getting scheduled emails due:', error);
+    throw error;
+  }
+}
+
+/**
+ * Campaign functions
+ */
+async function createCampaign(campaignData) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO email_campaigns (user_id, subject, message, total_count, status)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, created_at`,
+      [
+        campaignData.user_id,
+        campaignData.subject,
+        campaignData.message,
+        campaignData.total_count,
+        'in_progress',
+      ]
+    );
+    return { id: result.rows[0].id, ...campaignData };
+  } catch (error) {
+    console.error('Error creating campaign:', error);
+    throw error;
+  }
+}
+
+async function getCampaign(campaignId) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM email_campaigns WHERE id = $1',
+      [campaignId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting campaign:', error);
+    throw error;
+  }
+}
+
+async function updateCampaign(campaignId, updates) {
+  try {
+    const fields = [];
+    const values = [campaignId];
+    let paramNum = 2;
+
+    if (updates.sent_count !== undefined) {
+      fields.push(`sent_count = $${paramNum}`);
+      values.push(updates.sent_count);
+      paramNum++;
+    }
+    if (updates.failed_count !== undefined) {
+      fields.push(`failed_count = $${paramNum}`);
+      values.push(updates.failed_count);
+      paramNum++;
+    }
+    if (updates.status) {
+      fields.push(`status = $${paramNum}`);
+      values.push(updates.status);
+      paramNum++;
+    }
+
+    if (fields.length === 0) return;
+
+    await pool.query(
+      `UPDATE email_campaigns SET ${fields.join(', ')} WHERE id = $1`,
+      values
+    );
+  } catch (error) {
+    console.error('Error updating campaign:', error);
+    throw error;
+  }
+}
+
+/**
+ * Helper functions
+ */
+async function getClientsByAdvisor(userId) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM clients WHERE user_id = $1',
+      [userId]
+    );
+    return result.rows || [];
+  } catch (error) {
+    console.error('Error getting advisor clients:', error);
+    throw error;
+  }
+}
+
+async function getClientsByIds(clientIds) {
+  try {
+    const placeholders = clientIds.map((_, i) => `$${i + 1}`).join(',');
+    const result = await pool.query(
+      `SELECT * FROM clients WHERE id IN (${placeholders})`,
+      clientIds
+    );
+    return result.rows || [];
+  } catch (error) {
+    console.error('Error getting clients by ids:', error);
+    throw error;
+  }
+}
+
+async function getClient(clientId) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM clients WHERE id = $1',
+      [clientId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting client:', error);
+    throw error;
+  }
+}
+
+async function getUser(userId) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM users WHERE id = $1',
+      [userId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting user:', error);
+    throw error;
+  }
+}
+
+/**
  * Health check - test database connection
  */
 async function healthCheck() {
@@ -307,4 +551,17 @@ module.exports = {
   getScenarioVersions,
   getScenarioVersion,
   getVersionCount,
+  createEmailLog,
+  getEmailLog,
+  createScheduledEmail,
+  getScheduledEmail,
+  updateScheduledEmail,
+  getScheduledEmailsDue,
+  createCampaign,
+  getCampaign,
+  updateCampaign,
+  getClientsByAdvisor,
+  getClientsByIds,
+  getClient,
+  getUser,
 };
