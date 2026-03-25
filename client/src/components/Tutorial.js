@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/Tutorial.css';
 
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+
 const Tutorial = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [verifyResults, setVerifyResults] = useState({});
@@ -13,7 +15,7 @@ const Tutorial = () => {
 
   const checkApiHealth = async () => {
     try {
-      const response = await fetch('/health');
+      const response = await fetch(`${API_URL}/health`);
       setApiStatus(response.ok ? 'connected' : 'disconnected');
     } catch {
       setApiStatus('error');
@@ -26,11 +28,11 @@ const Tutorial = () => {
 
     try {
       // Test 1: API endpoint responds
-      const healthRes = await fetch('/health');
+      const healthRes = await fetch(`${API_URL}/health`);
       results.apiHealth = healthRes.ok;
 
       // Test 2: Calculate endpoint works
-      const calcRes = await fetch('/api/calculate', {
+      const calcRes = await fetch(`${API_URL}/api/calculate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -71,7 +73,7 @@ const Tutorial = () => {
       }
 
       // Test 3: Database connectivity (via scenarios list)
-      const scenarioRes = await fetch('/api/scenarios');
+      const scenarioRes = await fetch(`${API_URL}/api/scenarios`);
       results.databaseConnected = scenarioRes.ok;
 
       setVerifyResults(results);
