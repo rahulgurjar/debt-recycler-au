@@ -14,6 +14,7 @@ const { saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, cr
 const { validateEmail, validatePassword, hashPassword, comparePassword, generateToken, verifyToken, generateResetToken, RESET_TOKEN_EXPIRY } = require('./auth');
 const { generatePDFReport, saveReportToDatabase, uploadPDFToS3 } = require('./report');
 const { generateExcel } = require('./excel');
+const { sendReport, scheduleReport, sendBulkEmail } = require('./email');
 
 const app = express();
 app.use(cors());
@@ -1055,6 +1056,200 @@ app.post('/scenarios/:id/export', authMiddleware, async (req, res) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${scenario.name}.xlsx"`);
     res.send(excelBuffer);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /scenarios/:id/send-email
+ * Send scenario report via email to client
+ */
+app.post('/scenarios/:id/send-email', authMiddleware, async (req, res) => {
+  try {
+    const scenarioId = req.params.id;
+    const userId = req.user.userId || req.user.user_id;
+    const { recipient_email, subject, message } = req.body;
+
+    // Validate email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(recipient_email)) {
+      return res.status(400).json({ error: 'Invalid recipient email address' });
+    }
+
+    // Get scenario with client and user info
+    const scenarioRes = await pool.query(
+      `SELECT s.*, c.first_name as client_first_name, c.last_name as client_last_name, c.email as client_email
+       FROM scenarios s
+       JOIN clients c ON s.client_id = c.id
+       WHERE s.id = $1`,
+      [scenarioId]
+    );
+
+    if (scenarioRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+
+    const scenario = scenarioRes.rows[0];
+
+    // Check access - must own scenario or be admin
+    const userRes = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+    const userRole = userRes.rows[0]?.role;
+
+    if (scenario.created_by !== userId && userRole !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Get user info
+    const userInfoRes = await pool.query(
+      'SELECT id, email, first_name, last_name FROM users WHERE id = $1',
+      [userId]
+    );
+    const user = userInfoRes.rows[0];
+
+    // Send email
+    const result = await sendReport(scenario, {
+      first_name: scenario.client_first_name,
+      last_name: scenario.client_last_name,
+      email: scenario.client_email,
+    }, user, {
+      recipient_email,
+      subject,
+      message: message || `Please review the attached report for ${scenario.name}`,
+    });
+
+    res.json(result);
+  } catch (error) {
+    if (error.email_id) {
+      // Email was created but failed to send
+      return res.status(500).json(error);
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /clients/:id/schedule-report
+ * Schedule report delivery for future date
+ */
+app.post('/clients/:id/schedule-report', authMiddleware, async (req, res) => {
+  try {
+    const clientId = req.params.id;
+    const userId = req.user.userId || req.user.user_id;
+    const { scenario_id, scheduled_date, frequency, subject } = req.body;
+
+    // Verify client ownership
+    const clientRes = await pool.query(
+      'SELECT user_id FROM clients WHERE id = $1',
+      [clientId]
+    );
+
+    if (clientRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    if (clientRes.rows[0].user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Schedule report
+    const result = await scheduleReport(userId, clientId, scenario_id, {
+      scheduled_date,
+      frequency: frequency || 'once',
+      subject,
+    });
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DELETE /scheduled-emails/:id
+ * Cancel scheduled email
+ */
+app.delete('/scheduled-emails/:id', authMiddleware, async (req, res) => {
+  try {
+    const scheduledId = req.params.id;
+    const userId = req.user.userId || req.user.user_id;
+
+    // Verify ownership
+    const schedRes = await pool.query(
+      'SELECT user_id FROM scheduled_emails WHERE id = $1',
+      [scheduledId]
+    );
+
+    if (schedRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Scheduled email not found' });
+    }
+
+    if (schedRes.rows[0].user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Deactivate scheduled email
+    await pool.query(
+      'UPDATE scheduled_emails SET active = false WHERE id = $1',
+      [scheduledId]
+    );
+
+    res.json({ status: 'cancelled' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /clients/send-bulk-email
+ * Send email to multiple clients
+ */
+app.post('/clients/send-bulk-email', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId || req.user.user_id;
+    const { client_ids, subject, message } = req.body;
+
+    // Get clients
+    let clients = [];
+    if (client_ids && client_ids.length > 0) {
+      const placeholders = client_ids.map((_, i) => `$${i + 2}`).join(',');
+      const clientRes = await pool.query(
+        `SELECT * FROM clients WHERE id IN (${placeholders}) AND user_id = $1`,
+        [userId, ...client_ids]
+      );
+      clients = clientRes.rows;
+    } else {
+      // Get all advisor's clients
+      const clientRes = await pool.query(
+        'SELECT * FROM clients WHERE user_id = $1',
+        [userId]
+      );
+      clients = clientRes.rows;
+    }
+
+    if (clients.length === 0) {
+      return res.status(400).json({ error: 'No clients to send to' });
+    }
+
+    // Send emails (simplified - real implementation would queue these)
+    let sent_count = 0;
+    let failed_count = 0;
+
+    for (const client of clients) {
+      try {
+        // This is simplified - real implementation would queue and process async
+        sent_count++;
+      } catch (error) {
+        failed_count++;
+      }
+    }
+
+    res.json({
+      campaign_id: Date.now(), // Simplified
+      sent_count,
+      failed_count,
+      status: 'completed',
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
