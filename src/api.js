@@ -555,6 +555,208 @@ app.post('/clients/import', authMiddleware, async (req, res) => {
   }
 });
 
+// Scenario Management Endpoints
+
+app.post('/scenarios', authMiddleware, async (req, res) => {
+  try {
+    const { client_id, name, initial_outlay, gearing_ratio, initial_loan, annual_investment, inflation, loc_interest_rate, etf_dividend_rate, etf_capital_appreciation, marginal_tax } = req.body;
+
+    if (!client_id || !name) {
+      return res.status(400).json({ error: 'Client ID and name required' });
+    }
+
+    if (gearing_ratio < 0 || gearing_ratio > 1) {
+      return res.status(400).json({ error: 'Gearing ratio must be between 0 and 1' });
+    }
+
+    const clientRes = await pool.query(
+      'SELECT id FROM clients WHERE id = $1 AND customer_id = $2',
+      [client_id, req.user.userId]
+    );
+    if (clientRes.rows.length === 0) {
+      return res.status(403).json({ error: 'Client not found or unauthorized' });
+    }
+
+    const params = {
+      initial_outlay: initial_outlay || 55000,
+      gearing_ratio: gearing_ratio || 0.45,
+      initial_loan: initial_loan || 45000,
+      annual_investment: annual_investment || 25000,
+      inflation: inflation || 0.03,
+      loc_interest_rate: loc_interest_rate || 0.07,
+      etf_dividend_rate: etf_dividend_rate || 0.03,
+      etf_capital_appreciation: etf_capital_appreciation || 0.07,
+      marginal_tax: marginal_tax || 0.47,
+    };
+
+    const projection = calculate(params);
+
+    const scenarioRes = await pool.query(
+      `INSERT INTO scenarios (client_id, name, initial_outlay, gearing_ratio, initial_loan, annual_investment, inflation, loc_interest_rate, etf_dividend_rate, etf_capital_appreciation, marginal_tax, final_wealth, xirr)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING id, name, initial_outlay, gearing_ratio`,
+      [client_id, name, params.initial_outlay, params.gearing_ratio, params.initial_loan, params.annual_investment, params.inflation, params.loc_interest_rate, params.etf_dividend_rate, params.etf_capital_appreciation, params.marginal_tax, projection.final_wealth, projection.xirr]
+    );
+
+    for (const year of projection.years) {
+      await pool.query(
+        `INSERT INTO projections (scenario_id, year, date, pf_value, loan, wealth, dividend, loc_interest, taxable_dividend, after_tax_dividend, pf_value_30_june, wealth_30_june, gearing)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [scenarioRes.rows[0].id, year.year, year.date, year.pf_value, year.loan, year.wealth, year.dividend || 0, year.loc_interest || 0, year.taxable_dividend || 0, year.after_tax_dividend || 0, year.pf_value_30_june || 0, year.wealth_30_june || 0, year.gearing || 0]
+      );
+    }
+
+    res.status(201).json({
+      scenario: scenarioRes.rows[0],
+      projection,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/scenarios/:id', authMiddleware, async (req, res) => {
+  try {
+    const scenarioRes = await pool.query(
+      `SELECT s.* FROM scenarios s
+       JOIN clients c ON s.client_id = c.id
+       WHERE s.id = $1 AND c.customer_id = $2`,
+      [req.params.id, req.user.userId]
+    );
+
+    if (scenarioRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+
+    const projectionsRes = await pool.query(
+      'SELECT * FROM projections WHERE scenario_id = $1 ORDER BY year',
+      [req.params.id]
+    );
+
+    const scenario = scenarioRes.rows[0];
+    scenario.projections = projectionsRes.rows;
+
+    res.json({ scenario });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/clients/:clientId/scenarios', authMiddleware, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+
+    const clientRes = await pool.query(
+      'SELECT id FROM clients WHERE id = $1 AND customer_id = $2',
+      [req.params.clientId, req.user.userId]
+    );
+
+    if (clientRes.rows.length === 0) {
+      return res.status(403).json({ error: 'Client not found' });
+    }
+
+    const countRes = await pool.query(
+      'SELECT COUNT(*) FROM scenarios WHERE client_id = $1',
+      [req.params.clientId]
+    );
+
+    const scenariosRes = await pool.query(
+      `SELECT id, name, initial_outlay, gearing_ratio, final_wealth, xirr, created_at FROM scenarios
+       WHERE client_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [req.params.clientId, limit, offset]
+    );
+
+    res.json({
+      scenarios: scenariosRes.rows,
+      total: parseInt(countRes.rows[0].count),
+      limit,
+      offset,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/scenarios/:id', authMiddleware, async (req, res) => {
+  try {
+    const { initial_outlay, gearing_ratio, initial_loan, annual_investment, inflation, loc_interest_rate, etf_dividend_rate, etf_capital_appreciation, marginal_tax } = req.body;
+
+    const scenarioRes = await pool.query(
+      `SELECT s.* FROM scenarios s
+       JOIN clients c ON s.client_id = c.id
+       WHERE s.id = $1 AND c.customer_id = $2`,
+      [req.params.id, req.user.userId]
+    );
+
+    if (scenarioRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+
+    const scenario = scenarioRes.rows[0];
+
+    if (gearing_ratio && (gearing_ratio < 0 || gearing_ratio > 1)) {
+      return res.status(400).json({ error: 'Gearing ratio must be between 0 and 1' });
+    }
+
+    const params = {
+      initial_outlay: initial_outlay || scenario.initial_outlay,
+      gearing_ratio: gearing_ratio || scenario.gearing_ratio,
+      initial_loan: initial_loan || scenario.initial_loan,
+      annual_investment: annual_investment || scenario.annual_investment,
+      inflation: inflation || scenario.inflation,
+      loc_interest_rate: loc_interest_rate || scenario.loc_interest_rate,
+      etf_dividend_rate: etf_dividend_rate || scenario.etf_dividend_rate,
+      etf_capital_appreciation: etf_capital_appreciation || scenario.etf_capital_appreciation,
+      marginal_tax: marginal_tax || scenario.marginal_tax,
+    };
+
+    const projection = calculate(params);
+
+    await pool.query(
+      `UPDATE scenarios SET initial_outlay = $1, gearing_ratio = $2, initial_loan = $3, annual_investment = $4, inflation = $5, loc_interest_rate = $6, etf_dividend_rate = $7, etf_capital_appreciation = $8, marginal_tax = $9, final_wealth = $10, xirr = $11 WHERE id = $12`,
+      [params.initial_outlay, params.gearing_ratio, params.initial_loan, params.annual_investment, params.inflation, params.loc_interest_rate, params.etf_dividend_rate, params.etf_capital_appreciation, params.marginal_tax, projection.final_wealth, projection.xirr, req.params.id]
+    );
+
+    await pool.query('DELETE FROM projections WHERE scenario_id = $1', [req.params.id]);
+
+    for (const year of projection.years) {
+      await pool.query(
+        `INSERT INTO projections (scenario_id, year, date, pf_value, loan, wealth, dividend, loc_interest, taxable_dividend, after_tax_dividend, pf_value_30_june, wealth_30_june, gearing)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [req.params.id, year.year, year.date, year.pf_value, year.loan, year.wealth, year.dividend || 0, year.loc_interest || 0, year.taxable_dividend || 0, year.after_tax_dividend || 0, year.pf_value_30_june || 0, year.wealth_30_june || 0, year.gearing || 0]
+      );
+    }
+
+    res.json({
+      scenario: { id: req.params.id, ...params, final_wealth: projection.final_wealth, xirr: projection.xirr },
+      projection,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/scenarios/:id', authMiddleware, async (req, res) => {
+  try {
+    const scenarioRes = await pool.query(
+      `DELETE FROM scenarios
+       WHERE id = $1 AND client_id IN (SELECT id FROM clients WHERE customer_id = $2)`,
+      [req.params.id, req.user.userId]
+    );
+
+    if (scenarioRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+
+    res.json({ message: 'Scenario deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /**
  * POST /api/calculate
  * Calculate debt recycling projection for given parameters
