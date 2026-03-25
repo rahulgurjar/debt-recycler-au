@@ -84,7 +84,28 @@ Build a debt recycling calculator for Australian property investors. Spec-driven
 
 ---
 
-## Phase 3 — Go Live
+## Phase 3 — HTTPS & Security
+
+### 3.1 HTTPS Support (CloudFront + ACM)
+**Spec:** spec/04_https_specification.md
+**Status:** pending
+
+- [ ] Create private S3 bucket (no website hosting)
+- [ ] Configure CloudFront distribution with ACM certificate
+- [ ] Set up Origin Access Control (OAC)
+- [ ] Update template.yaml with CloudFront resources
+- [ ] Update GitHub Actions for private S3 sync + cache invalidation
+
+**Verification (Chrome MCP):**
+- V1: HTTPS availability & certificate validity
+- V2: HTTP redirect to HTTPS
+- V3: API calls use HTTPS
+- V4: CloudFront cache headers present
+- V5: End-to-end calculation works over HTTPS
+
+---
+
+## Phase 4 — Go Live
 
 - [ ] Deploy to production
 - [ ] Test live calculations
@@ -132,22 +153,93 @@ See spec/03_business_rules.md for formula.
 
 **All development must follow: /workspace/RALPH_GUARDRAILS.md**
 
-Linear tickets for this phase:
-- **RAH-59**: Feature Request (Phase 1 - Calculator Engine)
-- **RAH-62**: Spec (Calculator specification + test cases)
-- **RAH-63**: Tests (Test suite with run instructions)
-- **RAH-61**: Blocker (Formula validation - Year 10+ mismatch)
-- **RAH-64**: Verification (Production validation procedures)
+### Phase 3 (HTTPS) — Chrome MCP Verification
 
-**Requirements:**
-✅ Spec in Linear (RAH-62)
-✅ Tests in Linear with "How to Run" (RAH-63)
-✅ Verification in Linear with "How to Verify" (RAH-64)
-✅ Tests runnable by independent reviewer (no AI)
-✅ Verification runnable by independent reviewer (no AI)
-❌ Formula blocker (RAH-61) must be resolved
-❌ Tests must all pass before marking Done
-❌ Git commits must reference ticket IDs (e.g., `Closes RAH-59`)
+This is the first phase to use Chrome MCP for automated browser-based verification.
+
+**Pre-conditions for Ralph:**
+- [ ] spec/04_https_specification.md exists with V1-V5 verification steps
+- [ ] scripts/verify-https.js exists with all test functions
+- [ ] spec/00_verification_pattern.md exists (verification template)
+- [ ] .mcp.json configured with Chrome MCP server
+- [ ] Chrome/Chromium available locally with remote debugging
+
+**Ralph Loop Commands:**
+```bash
+# Run Phase 3 implementation with Chrome MCP verification
+cd /home/oem/claude/debt-recycler-au
+
+# 1. Implement HTTPS infrastructure (CloudFront + ACM)
+claude --max-turns 30 "Implement Phase 3 HTTPS support per spec/04_https_specification.md. Read PLAN.md Phase 3.1 tasks, template.yaml, and DEPLOYMENT.md for context. After implementation, verify with: node scripts/verify-https.js https://[production-url]"
+
+# 2. Get production URL from deployment
+PROD_URL=$(aws cloudformation describe-stacks --stack-name debt-recycler-au --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontURL`].OutputValue' --output text)
+
+# 3. Run Chrome MCP verification
+node scripts/verify-https.js $PROD_URL
+
+# 4. If verification passes (exit 0), commit and create PR
+git add -A
+git commit -m "feat(https): Add CloudFront + ACM certificate support
+
+- Migrate frontend to private S3 + CloudFront distribution
+- Configure ACM certificate for HTTPS
+- Implement HTTP → HTTPS redirect
+- Update GitHub Actions for private S3 sync
+
+Verified with Chrome MCP:
+✅ V1 HTTPS Availability
+✅ V2 HTTP Redirect
+✅ V3 API HTTPS
+✅ V4 CloudFront Cache
+✅ V5 End-to-End Calculation
+"
+
+gh pr create --draft --title "HTTPS Support with CloudFront & ACM" --body "$(cat <<EOF
+## Summary
+Added HTTPS support via CloudFront distribution with ACM certificate.
+
+## Verification
+All Chrome MCP verification steps pass:
+- V1: HTTPS available, certificate valid ✅
+- V2: HTTP redirects to HTTPS ✅
+- V3: API calls encrypted with HTTPS ✅
+- V4: CloudFront cache headers present ✅
+- V5: End-to-end calculation works ✅
+
+## Testing
+Production URL: $PROD_URL
+Verify with: \`node scripts/verify-https.js $PROD_URL\`
+
+🤖 Generated with Claude Code Ralph Loop
+EOF
+)"
+```
+
+**Post-conditions for Ralph:**
+- [ ] All Chrome MCP verification steps pass (exit code 0)
+- [ ] Infrastructure code deployed to AWS
+- [ ] Git commits created with verification evidence
+- [ ] PR drafted ready for review
+
+**Evidence to Attach:**
+1. Console output from `node scripts/verify-https.js` (all 5 verifications passing)
+2. CloudFormation stack outputs showing CloudFront URL
+3. AWS certificate details (issuer, expiry)
+4. Network tab screenshot showing HTTPS requests
+
+**Rollback Procedure:**
+If verification fails after AWS deployment:
+```bash
+# Revert CloudFormation changes
+aws cloudformation delete-stack --stack-name debt-recycler-au
+
+# Revert code
+git reset --hard origin/main
+
+# Update DNS back to S3 website endpoint
+aws route53 change-resource-record-sets --hosted-zone-id Z123... --change-batch file://revert.json
+```
 
 ---
 

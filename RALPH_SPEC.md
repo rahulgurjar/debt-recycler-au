@@ -6,6 +6,59 @@ A **ralph loop** is an agentic bash/Python loop that feeds implementation tasks 
 the spec into Claude CLI, one at a time, letting Claude autonomously build the project.
 "Ralphing" = iterative agentic construction with back pressure.
 
+## Chrome MCP Verification Integration
+
+Starting with Phase 3 (HTTPS Support), all specs include **Chrome MCP verification steps**.
+
+### Pattern: Spec → Tests → Implementation → Chrome MCP Verification
+
+Each spec defines:
+1. **Functional Requirements** — what the feature does
+2. **Verification with Chrome MCP** — browser-based automated tests
+   - V1, V2, V3... specific acceptance criteria
+   - Each verification is a self-contained Chrome scenario
+   - Uses headless Chrome (no manual clicking)
+3. **Success Criteria** — what must pass before merging
+
+### Example Verification Flow (HTTPS Spec)
+
+```
+spec/04_https_specification.md defines:
+├─ V1: HTTPS Availability
+│  └─ Navigate to URL, verify HTTPS protocol + valid cert
+├─ V2: HTTP Redirect
+│  └─ Verify HTTP → HTTPS redirect works
+├─ V3: API HTTPS
+│  └─ Monitor requests, verify /api/* endpoints use HTTPS
+├─ V4: CloudFront Cache
+│  └─ Check cache-control and x-cache headers
+└─ V5: End-to-End Calculation
+   └─ Full workflow: form fill → calculate → verify results
+
+scripts/verify-https.js implements all V1-V5 checks
+└─ Run: Chrome MCP page automation calls each test function
+```
+
+### For Ralph Loop Operators
+
+When a verification spec is complete:
+
+```bash
+# Ralph calls this automatically:
+node scripts/verify-https.js https://[production-url]
+
+# Output shows:
+# ✓ V1 HTTPS Availability: PASSED
+# ✓ V2 HTTP Redirect: PASSED
+# ✓ V3 API HTTPS: PASSED
+# ✓ V4 CloudFront Cache: PASSED
+# ✓ V5 End-to-End Calculation: PASSED
+# 🎉 All tests PASSED!
+
+# Exit code 0 = ready to merge
+# Exit code 1 = verification failed (needs fixes)
+```
+
 ## Why "Ralph"?
 
 Ralph is the driver. Ralph reads the checklist, picks the next task, calls Claude,
