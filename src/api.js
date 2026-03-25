@@ -8,10 +8,12 @@
  */
 
 const express = require('express');
+const cors = require('cors');
 const { calculate } = require('./calculator');
 const { saveScenario, getScenarios, getScenario, deleteScenario, healthCheck } = require('./db');
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 // Health check
