@@ -13,6 +13,7 @@ const { calculate } = require('./calculator');
 const { saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken, createScenarioVersion, getScenarioVersions, getScenarioVersion, getVersionCount } = require('./db');
 const { validateEmail, validatePassword, hashPassword, comparePassword, generateToken, verifyToken, generateResetToken, RESET_TOKEN_EXPIRY } = require('./auth');
 const { generatePDFReport, saveReportToDatabase, uploadPDFToS3 } = require('./report');
+const { generateExcel } = require('./excel');
 
 const app = express();
 app.use(cors());
@@ -996,6 +997,64 @@ app.post('/scenarios/:id/report', authMiddleware, async (req, res) => {
         company_name: companyName,
       },
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /scenarios/:id/export
+ * Export scenario to Excel file
+ */
+app.post('/scenarios/:id/export', authMiddleware, async (req, res) => {
+  try {
+    const scenarioId = req.params.id;
+    const userId = req.user.userId || req.user.user_id;
+
+    // Get scenario with client info
+    const scenarioRes = await pool.query(
+      `SELECT s.*, c.first_name as client_first_name, c.last_name as client_last_name, c.email as client_email
+       FROM scenarios s
+       JOIN clients c ON s.client_id = c.id
+       WHERE s.id = $1`,
+      [scenarioId]
+    );
+
+    if (scenarioRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+
+    const scenario = scenarioRes.rows[0];
+
+    // Check access control - owner or admin
+    const userRes = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+    const userRole = userRes.rows[0]?.role;
+
+    if (scenario.created_by !== userId && userRole !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Get user info
+    const userInfoRes = await pool.query(
+      'SELECT email, first_name, last_name FROM users WHERE id = $1',
+      [userId]
+    );
+    const user = userInfoRes.rows[0];
+
+    // Get client info
+    const client = {
+      first_name: scenario.client_first_name,
+      last_name: scenario.client_last_name,
+      email: scenario.client_email,
+    };
+
+    // Generate Excel
+    const excelBuffer = await generateExcel(scenario, client, user);
+
+    // Send file
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${scenario.name}.xlsx"`);
+    res.send(excelBuffer);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
