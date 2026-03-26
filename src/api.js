@@ -10,7 +10,7 @@
 const express = require('express');
 const cors = require('cors');
 const { calculate } = require('./calculator');
-const { saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken, createScenarioVersion, getScenarioVersions, getScenarioVersion, getVersionCount } = require('./db');
+const { pool, saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken, createScenarioVersion, getScenarioVersions, getScenarioVersion, getVersionCount } = require('./db');
 const { validateEmail, validatePassword, hashPassword, comparePassword, generateToken, verifyToken, generateResetToken, RESET_TOKEN_EXPIRY } = require('./auth');
 // const { generatePDFReport, saveReportToDatabase, uploadPDFToS3 } = require('./report');
 const { generateExcel } = require('./excel');
