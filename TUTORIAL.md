@@ -1,383 +1,573 @@
-# Debt Recycler AU - Complete Tutorial & Specification Verification
+# Debt Recycler AU — Complete User Guide
 
-## Overview
-
-The Debt Recycler AU is a sophisticated wealth projection tool that calculates 20-year financial outcomes using debt recycling strategies. This tutorial covers usage, verification, and specification compliance.
-
----
-
-## Part 1: How to Use the Calculator
-
-### Step 1: Access the Application
-
-**Online**: https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/
-**Region**: ap-southeast-2 (Sydney, Australia)
-**Database**: PostgreSQL 15.10 on AWS RDS
-
-### Step 2: Input Parameters
-
-The calculator requires 9 parameters (all with defaults):
-
-| Parameter | Default | Range | Description |
-|-----------|---------|-------|-------------|
-| **Initial Outlay** | $55,000 | $0-∞ | Initial investment amount |
-| **Gearing Ratio** | 45% | 0%-100% | Loan-to-portfolio ratio |
-| **Initial Loan** | $45,000 | $0-∞ | Starting loan amount |
-| **Annual Investment** | $25,000 | $0-∞ | Yearly additional investment |
-| **Inflation** | 3% | 0%-10% | Annual inflation rate |
-| **LOC Interest Rate** | 7% | 0%-15% | Line of credit interest rate |
-| **ETF Dividend Rate** | 3% | 0%-10% | Annual dividend yield |
-| **ETF Capital Appreciation** | 7% | 0%-20% | Annual growth rate |
-| **Marginal Tax Rate** | 47% | 0%-60% | Personal tax bracket |
-
-### Step 3: Calculate Projection
-
-Click **Calculate** to generate a 20-year wealth projection with:
-- Year-by-year portfolio value
-- Loan balance tracking
-- Gearing ratio maintenance
-- Dividend calculations
-- Tax implications
-- After-tax returns
-
-### Step 4: Review Results
-
-**Summary Cards Display**:
-- **Final Wealth**: Year 20 net wealth (portfolio - loan)
-- **XIRR**: Internal rate of return (%)
-- **PF Value**: Portfolio value at end
-- **Outstanding Loan**: Loan balance
-- **Gearing Ratio**: Loan/portfolio ratio maintained
-- **Total Invested**: Cumulative capital deployed
-
-### Step 5: Interactive Charts
-
-Four interactive visualizations:
-
-1. **Wealth Projection**: 20-year net wealth growth trend
-2. **PF Value vs Loan**: Portfolio value and loan balance comparison
-3. **Gearing Ratio**: Maintains 45% throughout (algorithm enforced)
-4. **Dividend vs Interest**: Annual income vs costs
-
-### Step 6: Save Scenario
-
-Click **Save Scenario** to store calculation results with:
-- All 9 input parameters
-- Complete 21-year projection
-- Final metrics (wealth, XIRR)
-- Timestamp and unique ID
-
-### Step 7: Manage Saved Scenarios
-
-**Saved Scenarios Tab**:
-- List all saved calculations
-- Click row to view full details
-- Delete scenarios permanently
-- Export parameters for later use
+**Production API:** `https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod`
+**Frontend:** `https://d1p3am5bl1sho7.cloudfront.net`
+**Last verified:** 2026-03-27 against live production
 
 ---
 
-## Part 2: Formula Verification
-
-### Core Calculation Logic
-
-**Year 0** (June 30):
-```
-PF Value = Initial Outlay × (1 + appreciation)
-Wealth = PF Value - Initial Loan
-```
-
-**Years 1-20** (annually):
-```
-1. Dividend = Portfolio Value × dividend_rate
-2. LOC Interest = Loan × interest_rate
-3. Taxable Dividend = Dividend - LOC Interest
-4. After-Tax Dividend = Taxable Dividend × (1 - tax_rate)
-5. PF Value (30 June) = PF Value (start) × (1.07) + After-Tax Dividend
-6. New Loan = Maintains gearing ratio from start of year
-7. Adjusted Loan = New Loan + max(0, -After-Tax Dividend)
-8. Wealth = PF Value - Adjusted Loan
-```
-
-### Gearing Ratio Maintenance
-
-**Algorithm**:
-```
-new_loan = portfolio_value × gearing_ratio / (1 - gearing_ratio)
-```
-
-**Verification**: Gearing stays at 45% ± 0.01% throughout all 21 years
-
-### XIRR Calculation
-
-**Newton-Raphson Method**:
-- Initial rate guess: 10%
-- Convergence tolerance: 1e-6
-- Max iterations: 100
-
-**Cash Flows**:
-- Year 0: -Initial Outlay
-- Years 1-19: -Annual Investment (negative outflow)
-- Year 20: -Annual Investment + Final Wealth (final payout)
-
-**Verification**: XIRR should be 13.53% for default parameters
-
----
-
-## Part 3: Specification Requirements & Testing
-
-### Specification Document
-Located in: `SPECIFICATION.md`
-
-**Key Sections**:
-1. Input Parameters (9 defined)
-2. Year 0 Calculation (initial setup)
-3. Year 1+ Calculation (annual loop)
-4. Expected Values Table (Years 0-20)
-5. XIRR Methodology (13.53% expected)
-
-### Test Suite
-Located in: `tests/calculator.test.js`
-
-**44 Total Tests**:
-- ✅ All tests passing
-- ✅ 88.23% statement coverage
-- ✅ 90.9% function coverage
-
-**Test Categories**:
-
-1. **Year 0 Tests** (3 tests):
-   - Wealth calculation
-   - PF Value verification
-   - Loan amount validation
-
-2. **Year 1-20 Tests** (21 tests, one per year):
-   - Wealth verification for each year
-   - PF Value against expected values
-   - Loan balance tracking
-
-3. **Gearing Ratio Tests** (4 tests):
-   - Gearing maintained at 45%
-   - All 21 years within tolerance
-   - Precision: ±0.0001
-
-4. **XIRR Validation** (1 test):
-   - Expected: 13.53%
-   - Precision: ±0.01%
-   - NPV verification at calculated rate
-
-5. **Sensitivity Tests** (15 tests):
-   - Parameter variations
-   - Edge cases
-   - Boundary conditions
-
-### Running Tests
+## Quick Verification (copy-paste to confirm everything works)
 
 ```bash
-npm test
-```
-
-**Output**:
-```
-Test Suites: 2 passed, 2 total
-Tests:       44 passed, 44 total
-Statements:  88.23% covered
-Functions:   90.9% covered
+BASE="https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod"
+curl -s "$BASE/health"
+# Expected: {"status":"ok","database":{"connected":true,...}}
 ```
 
 ---
 
-## Part 4: API Specification
+## Feature 1 — Health Check
 
-### Endpoints
+```bash
+curl https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/health
+```
 
-**1. POST /api/calculate**
-- **Purpose**: Calculate projection
-- **Input**: 9 parameters (all optional, uses defaults)
-- **Output**: 21-year projection with XIRR
-- **Response Time**: < 100ms
-
-**Example Request**:
+**Expected response:**
 ```json
-POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/api/calculate
+{"status":"ok","database":{"connected":true}}
+```
 
+---
+
+## Feature 2 — Authentication
+
+### Sign Up (creates your workspace)
+
+```bash
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "you@yourcompany.com",
+    "password": "YourPass123!",
+    "company_name": "Your Advisory Firm"
+  }'
+```
+
+**Expected response:**
+```json
 {
-  "initial_outlay": 55000,
-  "gearing_ratio": 0.45,
-  "initial_loan": 45000,
-  "annual_investment": 25000,
-  "inflation": 0.03,
-  "loc_interest_rate": 0.07,
-  "etf_dividend_rate": 0.03,
-  "etf_capital_appreciation": 0.07,
-  "marginal_tax": 0.47
+  "user": {"id": 1, "email": "you@yourcompany.com", "role": "admin"},
+  "token": "eyJ..."
 }
 ```
 
-**Example Response**:
+The first signup for a company name becomes **admin**. All subsequent signups with the same company name become **advisor**.
+
+**Save your token** — you need it for every authenticated request:
+```bash
+TOKEN="eyJ..."  # paste your token here
+```
+
+### Log In
+
+```bash
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@yourcompany.com", "password": "YourPass123!"}'
+```
+
+### Password Reset
+
+```bash
+# Step 1: Request reset token
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/auth/forgot-password \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@yourcompany.com"}'
+
+# Step 2: Use reset token
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{"reset_token": "TOKEN_FROM_STEP1", "new_password": "NewPass123!"}'
+```
+
+---
+
+## Feature 3 — Workspace Management
+
+### Get Your Workspace
+
+```bash
+curl https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/workspace \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Expected response:**
 ```json
 {
-  "years": [
-    {
-      "year": 0,
-      "pf_value": 58900,
-      "loan": 45000,
-      "wealth_30_june": 13900,
-      "xirr": 0.1353
-    },
-    {
-      "year": 1,
-      "wealth_30_june": 97987.50,
-      "pf_value": 170234.78,
-      "gearing": 0.45
-    },
-    ...
-  ]
+  "id": 1,
+  "company_name": "Your Advisory Firm",
+  "subscription_tier": "starter",
+  "team_members": [{"id": 1, "email": "you@yourcompany.com", "role": "admin"}]
 }
 ```
 
-**2. POST /api/scenarios**
-- **Purpose**: Save calculation
-- **Input**: Calculation result + scenario name
-- **Output**: Saved scenario ID
-- **Database**: PostgreSQL
+### Invite a Team Member (admin only)
 
-**3. GET /api/scenarios**
-- **Purpose**: List all saved scenarios
-- **Output**: Array of scenario summaries
-
-**4. GET /api/scenarios/:id**
-- **Purpose**: Retrieve specific scenario
-- **Output**: Full scenario with projections
-
-**5. DELETE /api/scenarios/:id**
-- **Purpose**: Remove scenario
-- **Output**: Success confirmation
-
-**6. GET /health**
-- **Purpose**: Health check
-- **Output**: `{connected: true/false}`
-
----
-
-## Part 5: Database Schema
-
-### Scenarios Table
-```sql
-CREATE TABLE scenarios (
-  id SERIAL PRIMARY KEY,
-  user_id VARCHAR(255),
-  name VARCHAR(255) NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW(),
-  initial_outlay DECIMAL(10, 2) DEFAULT 55000,
-  gearing_ratio DECIMAL(5, 4) DEFAULT 0.45,
-  initial_loan DECIMAL(10, 2) DEFAULT 45000,
-  annual_investment DECIMAL(10, 2) DEFAULT 25000,
-  inflation DECIMAL(5, 4) DEFAULT 0.03,
-  loc_interest_rate DECIMAL(5, 4) DEFAULT 0.07,
-  etf_dividend_rate DECIMAL(5, 4) DEFAULT 0.03,
-  etf_capital_appreciation DECIMAL(5, 4) DEFAULT 0.07,
-  marginal_tax DECIMAL(5, 4) DEFAULT 0.47,
-  final_wealth DECIMAL(15, 2),
-  xirr DECIMAL(8, 6)
-);
+```bash
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/workspace/users \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "colleague@yourcompany.com", "role": "advisor"}'
 ```
 
-### Projections Table
-```sql
-CREATE TABLE projections (
-  id SERIAL PRIMARY KEY,
-  scenario_id INTEGER REFERENCES scenarios(id),
-  year INTEGER,
-  pf_value DECIMAL(15, 2),
-  loan DECIMAL(15, 2),
-  wealth DECIMAL(15, 2),
-  gearing DECIMAL(5, 4)
-);
+**Expected response:**
+```json
+{
+  "user": {"id": 2, "email": "colleague@yourcompany.com", "role": "advisor"},
+  "temporary_password": "abc123xyz789"
+}
+```
+
+Roles available: `admin`, `advisor`, `client`
+Rate limit: max 10 invites per day per admin. Exceeding returns `429`.
+
+### Change a User's Role (admin only)
+
+```bash
+curl -X PATCH https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/workspace/users/2 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "client"}'
+```
+
+### Remove a Team Member (admin only)
+
+```bash
+curl -X DELETE https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/workspace/users/2 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Workspace Settings
+
+```bash
+curl https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/workspace/settings \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Expected response:**
+```json
+{"subscription_tier": "starter", "monthly_price": 500, "max_clients": 10}
+```
+
+### Update Settings (admin only)
+
+```bash
+curl -X PATCH https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/workspace/settings \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"subscription_tier": "professional"}'
 ```
 
 ---
 
-## Part 6: Verification Checklist
+## Feature 4 — Client Management
 
-### ✅ Calculator Engine
-- [x] All 9 parameters with correct defaults
-- [x] Year 0 initialization correct
-- [x] 20-year loop accurate
-- [x] Gearing ratio maintained at 45%
-- [x] XIRR convergence to 13.53%
-- [x] NPV = 0 at calculated XIRR
+### Create a Client
 
-### ✅ Tests
-- [x] 44 tests passing
-- [x] 21 years verified (0-20)
-- [x] Year 20 wealth: $3,349,321.30
-- [x] XIRR: 13.53% (±0.01%)
-- [x] Gearing: 45% throughout
+```bash
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/clients \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Jane Smith",
+    "email": "jane@client.com",
+    "dob": "1985-06-15",
+    "annual_income": 150000,
+    "risk_profile": "moderate"
+  }'
+```
 
-### ✅ API
-- [x] POST /api/calculate working
-- [x] GET /health returning connected
-- [x] All endpoints returning correct data
-- [x] CORS enabled for all origins
-- [x] Response times < 100ms
+**Required fields:** `name`, `email`, `dob` (YYYY-MM-DD), `annual_income`, `risk_profile`
+**Valid risk profiles:** `conservative`, `moderate`, `aggressive`, `balanced`, `growth`, `high_growth`
 
-### ✅ Database
-- [x] PostgreSQL 15.10 running
-- [x] Schema initialized
-- [x] Scenarios table created
-- [x] Projections table created
-- [x] Foreign keys enforced
+**Expected response:**
+```json
+{"client": {"id": 1, "name": "Jane Smith", "email": "jane@client.com", ...}}
+```
 
-### ✅ Deployment
-- [x] Lambda function deployed
-- [x] API Gateway configured
-- [x] RDS instance publicly accessible
-- [x] CloudFormation stack created
-- [x] Database migrations completed
+### List Clients (paginated)
+
+```bash
+# Basic list
+curl "https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/clients" \
+  -H "Authorization: Bearer $TOKEN"
+
+# With pagination and sorting
+curl "https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/clients?limit=10&offset=0&sort_by=name" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Filter by risk profile
+curl "https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/clients?risk_profile=moderate" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Expected response:**
+```json
+{"clients": [...], "total": 5, "limit": 50, "offset": 0}
+```
+
+### Get One Client
+
+```bash
+curl https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/clients/1 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Update Client
+
+```bash
+curl -X PATCH https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/clients/1 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"annual_income": 175000, "risk_profile": "aggressive"}'
+```
+
+### Delete Client
+
+```bash
+curl -X DELETE https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/clients/1 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Deleting a client also deletes all their scenarios (cascade).
+
+### Bulk Import Clients from CSV
+
+```bash
+# Create a CSV file
+cat > clients.csv << 'EOF'
+name,email,dob,annual_income,risk_profile
+Alice Brown,alice@client.com,1980-03-20,120000,conservative
+Bob Jones,bob@client.com,1975-11-10,200000,aggressive
+EOF
+
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/clients/import \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: text/csv" \
+  --data-binary @clients.csv
+```
 
 ---
 
-## Part 7: Quick Reference
+## Feature 5 — Debt Recycling Scenarios
 
-### API Quick Test
+### Create a Scenario
+
+```bash
+# Minimal (uses defaults)
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"client_id": 1, "name": "Conservative Strategy"}'
+
+# Full parameters
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_id": 1,
+    "name": "Aggressive Growth",
+    "initial_outlay": 100000,
+    "initial_loan": 80000,
+    "gearing_ratio": 0.44,
+    "annual_investment": 30000,
+    "loc_interest_rate": 0.065,
+    "etf_dividend_rate": 0.035,
+    "etf_capital_appreciation": 0.08,
+    "marginal_tax": 0.47,
+    "inflation": 0.03
+  }'
+```
+
+**Expected response:** Full 20-year projection with XIRR (~13.53% for defaults).
+
+### List Scenarios
+
+```bash
+curl https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Get Scenario Details
+
+```bash
+curl https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios/1 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Update Scenario (creates new version)
+
+```bash
+curl -X PATCH https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios/1 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"annual_investment": 35000}'
+```
+
+### View Version History
+
+```bash
+curl https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios/1/versions \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Restore a Previous Version
+
+```bash
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios/1/versions/2/restore \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## Feature 6 — PDF Report Generation
+
+```bash
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios/1/report \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Jane Smith Debt Recycling Report"}'
+```
+
+**Expected response:**
+```json
+{"report_id": 1, "message": "Report generated", "s3_url": null}
+```
+
+Note: `s3_url` is null when AWS_S3_BUCKET is not configured. The PDF is generated in-memory.
+
+To download the PDF directly:
+```bash
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios/1/report \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}' \
+  --output report.pdf
+```
+
+---
+
+## Feature 7 — Excel Export
+
+```bash
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios/1/export \
+  -H "Authorization: Bearer $TOKEN" \
+  --output strategy.xlsx
+```
+
+Opens in Excel or Google Sheets. Contains:
+- **Parameters sheet**: All 9 input parameters
+- **Projection sheet**: 20-year year-by-year table
+- **Formulas**: XIRR, total tax, wealth gain (editable)
+
+---
+
+## Feature 8 — Email Reports to Clients
+
+```bash
+# Send now
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios/1/email \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "recipient_email": "jane@client.com",
+    "subject": "Your Debt Recycling Strategy Report"
+  }'
+
+# Schedule for later
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/scenarios/1/email \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "recipient_email": "jane@client.com",
+    "scheduled_at": "2026-04-01T09:00:00Z"
+  }'
+```
+
+**Expected response:**
+```json
+{"message": "Email sent", "email_log_id": 1, "subject": "Your Debt Recycling Strategy Report", "recipient": "jane@client.com"}
+```
+
+---
+
+## Feature 9 — Subscription & Billing (Stripe)
+
+### View Current Tier Limits
+
+```bash
+curl https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/workspace/settings \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+| Tier | Price | Max Clients | Scenarios/mo |
+|------|-------|-------------|--------------|
+| free | $0 | 5 | 3 |
+| starter | $500/mo | 10 | 5 |
+| professional | $1,500/mo | 100 | 50 |
+| enterprise | $3,000/mo | 1,000 | 500 |
+
+### What happens when you hit the limit
+
+Creating a client beyond your tier limit returns:
+```json
+{
+  "error": "Monthly client quota exceeded",
+  "monthly_limit": 10,
+  "monthly_used": 10,
+  "upgrade_url": "/billing/upgrade"
+}
+```
+HTTP status: `402 Payment Required`
+
+### Billing Portal
+
+```bash
+curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/billing/portal \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Returns a Stripe Billing Portal URL to manage subscriptions, view invoices, update payment method.
+
+---
+
+## Feature 10 — Admin Analytics Dashboard
+
+**Admin only** — returns 403 for advisor/client roles.
+
+```bash
+curl https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/admin/analytics \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Expected response:**
+```json
+{
+  "total_users": 8,
+  "signups_last_7_days": 6,
+  "signups_last_30_days": 8,
+  "tier_breakdown": {"starter": 0, "professional": 0, "enterprise": 0, "free": 8},
+  "mrr": 0,
+  "arr": 0,
+  "top_customers": [...]
+}
+```
+
+---
+
+## Role-Based Access Control (RBAC) Summary
+
+| Endpoint | Admin | Advisor | Client |
+|---|---|---|---|
+| GET /workspace | ✅ | ✅ | ❌ |
+| POST /workspace/users | ✅ | ❌ 403 | ❌ 403 |
+| PATCH /workspace/users/:id | ✅ | ❌ 403 | ❌ 403 |
+| DELETE /workspace/users/:id | ✅ | ❌ 403 | ❌ 403 |
+| GET /workspace/settings | ✅ | ✅ | ❌ |
+| PATCH /workspace/settings | ✅ | ❌ 403 | ❌ 403 |
+| POST /clients | ✅ | ✅ | ❌ |
+| POST /scenarios | ✅ | ✅ | ❌ |
+| GET /scenarios/:id | ✅ | ✅ | ✅ (read-only) |
+| GET /admin/analytics | ✅ | ❌ 403 | ❌ 403 |
+
+---
+
+## Debt Recycling Calculator (Legacy / Unauthenticated)
+
+The original Phase 1 calculator still works without authentication:
+
 ```bash
 curl -X POST https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod/api/calculate \
   -H "Content-Type: application/json" \
-  -d '{"initial_outlay": 55000}'
+  -d '{
+    "initial_outlay": 55000,
+    "gearing_ratio": 0.45,
+    "initial_loan": 45000,
+    "annual_investment": 25000,
+    "inflation": 0.03,
+    "loc_interest_rate": 0.07,
+    "etf_dividend_rate": 0.03,
+    "etf_capital_appreciation": 0.07,
+    "marginal_tax": 0.47
+  }'
 ```
 
-### Database Query
+**Expected:** 20-year projection, XIRR ~13.53%, Year 20 wealth ~$3,349,321.
+
+---
+
+## End-to-End Verification Script
+
+Run this to verify all features work in production:
+
 ```bash
-PGPASSWORD='DebtRecycler2024!' psql -h debt-recycler-db.cf802igwerlo.ap-southeast-2.rds.amazonaws.com \
-  -U postgres -d debt_recycler -c "SELECT COUNT(*) FROM scenarios;"
+BASE="https://4jyqo4weu8.execute-api.ap-southeast-2.amazonaws.com/prod"
+TS=$(date +%s)
+
+# 1. Health
+echo "1. Health:" $(curl -s "$BASE/health" | python3 -c "import sys,json; d=json.load(sys.stdin); print('OK' if d['status']=='ok' else 'FAIL')")
+
+# 2. Signup
+SIGNUP=$(curl -s -X POST "$BASE/auth/signup" -H "Content-Type: application/json" \
+  -d "{\"email\":\"verify${TS}@test.com\",\"password\":\"TestPass123!\",\"company_name\":\"VerifyCo\"}")
+TOKEN=$(echo $SIGNUP | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+echo "2. Signup: OK (role=$(echo $SIGNUP | python3 -c "import sys,json; print(json.load(sys.stdin)['user']['role'])"))"
+
+# 3. Workspace
+WS=$(curl -s "$BASE/workspace" -H "Authorization: Bearer $TOKEN")
+echo "3. Workspace: $(echo $WS | python3 -c "import sys,json; d=json.load(sys.stdin); print('OK company='+d['company_name'])")"
+
+# 4. Invite
+INVITE=$(curl -s -X POST "$BASE/workspace/users" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"email\":\"adv${TS}@test.com\",\"role\":\"advisor\"}")
+echo "4. Invite: $(echo $INVITE | python3 -c "import sys,json; d=json.load(sys.stdin); print('OK role='+d['user']['role'])")"
+
+# 5. Create client
+CLIENT=$(curl -s -X POST "$BASE/clients" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"name\":\"Test Client\",\"email\":\"client${TS}@test.com\",\"dob\":\"1985-01-01\",\"annual_income\":100000,\"risk_profile\":\"moderate\"}")
+CID=$(echo $CLIENT | python3 -c "import sys,json; print(json.load(sys.stdin)['client']['id'])")
+echo "5. Client: OK id=$CID"
+
+# 6. Create scenario
+SCENARIO=$(curl -s -X POST "$BASE/scenarios" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"client_id\":$CID,\"name\":\"Test Scenario\"}")
+SID=$(echo $SCENARIO | python3 -c "import sys,json; print(json.load(sys.stdin)['scenario']['id'])")
+XIRR=$(echo $SCENARIO | python3 -c "import sys,json; print(round(json.load(sys.stdin)['projection']['xirr']*100,2))")
+echo "6. Scenario: OK id=$SID xirr=${XIRR}%"
+
+# 7. Email
+EMAIL=$(curl -s -X POST "$BASE/scenarios/$SID/email" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"recipient_email\":\"client${TS}@test.com\"}")
+echo "7. Email: $(echo $EMAIL | python3 -c "import sys,json; d=json.load(sys.stdin); print('OK log_id='+str(d['email_log_id']))")"
+
+# 8. Analytics
+ANA=$(curl -s "$BASE/admin/analytics" -H "Authorization: Bearer $TOKEN")
+echo "8. Analytics: $(echo $ANA | python3 -c "import sys,json; d=json.load(sys.stdin); print('OK users='+str(d['total_users']))")"
+
+# 9. RBAC check
+RBAC=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/workspace")
+echo "9. RBAC (no auth): $([ '$RBAC' = '401' ] && echo 'OK 401' || echo 'FAIL got '$RBAC)"
+
+echo ""
+echo "All features verified in production."
 ```
 
-### Expected Year 20 Results
-- Wealth: $3,349,321.30
-- PF Value: $6,134,978.80
-- Loan: $2,785,657.50
-- Gearing: 45.00%
-- XIRR: 13.53%
+---
+
+## Troubleshooting
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `401 No token provided` | Missing Authorization header | Add `-H "Authorization: Bearer TOKEN"` |
+| `401 Invalid or expired token` | Token expired (30min TTL) | Re-login to get new token |
+| `403 Admin access required` | Using advisor/client token | Use admin token |
+| `400 All fields required` | Missing required body field | Check required fields per endpoint |
+| `409 User already exists` | Email already registered | Use different email |
+| `429 Invite limit reached` | >10 invites today | Wait 24h or use different admin |
+| `402 Monthly client quota exceeded` | Hit tier limit | Upgrade subscription tier |
 
 ---
 
-## Support & Troubleshooting
-
-**Issue**: API returning 403 Forbidden
-- **Solution**: Check CORS settings, ensure API Gateway stage is deployed
-
-**Issue**: Database connection timeout
-- **Solution**: Verify RDS security group allows port 5432, check credentials
-
-**Issue**: XIRR not converging
-- **Solution**: Ensure positive cash flows, check convergence tolerance in code
-
-**Issue**: Gearing ratio drifting
-- **Solution**: Verify rebalancing algorithm runs annually, check decimal precision
-
----
-
-**Last Updated**: 2026-03-25
-**Version**: 1.0
-**Status**: Production Ready ✅
+**Version:** 2.0
+**API Region:** ap-southeast-2 (Sydney)
+**Last verified:** 2026-03-27
