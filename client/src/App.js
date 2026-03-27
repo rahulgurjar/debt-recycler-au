@@ -4,6 +4,9 @@ import ScenarioList from './components/ScenarioList';
 import Tutorial from './components/Tutorial';
 import Login from './components/Login';
 import Signup from './components/Signup';
+import ClientsTable from './components/ClientsTable';
+import AnalyticsCards from './components/AnalyticsCards';
+import WorkspaceManager from './components/WorkspaceManager';
 import './App.css';
 
 function App() {
@@ -83,16 +86,39 @@ function App() {
           Saved Scenarios
         </button>
         <button
+          className={`nav-btn ${activeTab === 'clients' ? 'active' : ''}`}
+          onClick={() => setActiveTab('clients')}
+        >
+          Clients
+        </button>
+        {user?.role === 'admin' && (
+          <button
+            className={`nav-btn ${activeTab === 'analytics' ? 'active' : ''}`}
+            onClick={() => setActiveTab('analytics')}
+          >
+            Analytics
+          </button>
+        )}
+        <button
+          className={`nav-btn ${activeTab === 'workspace' ? 'active' : ''}`}
+          onClick={() => setActiveTab('workspace')}
+        >
+          Workspace
+        </button>
+        <button
           className={`nav-btn ${activeTab === 'tutorial' ? 'active' : ''}`}
           onClick={() => setActiveTab('tutorial')}
         >
-          Tutorial & Verification
+          Tutorial
         </button>
       </nav>
 
       <main className="app-main">
         {activeTab === 'calculator' && <Dashboard />}
         {activeTab === 'scenarios' && <ScenarioList />}
+        {activeTab === 'clients' && <ClientsTable />}
+        {activeTab === 'analytics' && <AnalyticsCards />}
+        {activeTab === 'workspace' && <WorkspaceManager userRole={user?.role} />}
         {activeTab === 'tutorial' && <Tutorial />}
       </main>
 
