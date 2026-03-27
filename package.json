@@ -42,7 +42,8 @@
     },
     "testPathIgnorePatterns": [
       "/node_modules/",
-      "/src/node_modules/"
+      "/src/node_modules/",
+      "/client/"
     ]
   },
   "devDependencies": {
