@@ -6,6 +6,51 @@
 
 ---
 
+## Using the Web App (https://d1p3am5bl1sho7.cloudfront.net)
+
+### Step 1 — Create Your Account
+1. Go to https://d1p3am5bl1sho7.cloudfront.net
+2. Click **Sign Up** — enter email, company name, and password (min 8 chars, uppercase, number, special char)
+3. First signup per company = **admin** (full access). Subsequent = **advisor**.
+4. You're logged in. You'll see the navigation tabs.
+
+### Step 2 — Navigation Tabs
+
+| Tab | Who Can Use | What It Does |
+|-----|-------------|--------------|
+| **Calculator** | Everyone | Phase 1 standalone debt recycling calculator |
+| **New Scenario** | Everyone | Create SaaS scenarios linked to a client (with recharts chart) |
+| **Saved Scenarios** | Everyone | View and delete your saved scenarios |
+| **Clients** | Everyone | Manage your client list (add/delete) |
+| **Analytics** | Admin only | Total users, MRR/ARR, tier breakdown, top customers |
+| **Workspace** | Everyone | View team members; admin can invite new members |
+| **Tutorial** | Everyone | This guide + API verification commands |
+
+### Step 3 — Add a Client (required before creating a scenario)
+1. Click **Clients** tab
+2. Click **Add Client**
+3. Fill in: Full Name, Email, Date of Birth, Annual Income, Risk Profile
+4. Click **Save Client** — client appears in the table
+
+### Step 4 — Create a Scenario
+1. Click **New Scenario** tab
+2. Select a client from the dropdown
+3. Enter a scenario name (e.g. "Conservative 20-Year Plan")
+4. Adjust parameters or leave defaults (55k outlay, 45% gearing, 7% LOC)
+5. Click **Run Scenario** — results show Final Wealth, XIRR, and 20-year chart
+
+### Step 5 — Invite a Team Member (admin only)
+1. Click **Workspace** tab
+2. Click **Invite Member**
+3. Enter their email and select role (advisor/admin)
+4. Click **Send Invite** — they receive login credentials
+
+### Step 6 — View Analytics (admin only)
+1. Click **Analytics** tab (only visible to admins)
+2. See: Total Users, 7-day/30-day signups, MRR, ARR, tier breakdown, top customers
+
+---
+
 ## Quick Verification (copy-paste to confirm everything works)
 
 ```bash
