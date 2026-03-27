@@ -10,7 +10,7 @@
 const express = require('express');
 const cors = require('cors');
 const { calculate } = require('./calculator');
-const { pool, saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken, createScenarioVersion, getScenarioVersions, getScenarioVersion, getVersionCount, getAdminByCompany, updateUserSubscription } = require('./db');
+const { pool, saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken, createScenarioVersion, getScenarioVersions, getScenarioVersion, getVersionCount, getAdminByCompany, updateUserSubscription, createEmailLog } = require('./db');
 const { validateEmail, validatePassword, hashPassword, comparePassword, generateToken, verifyToken, generateResetToken, RESET_TOKEN_EXPIRY } = require('./auth');
 const { generateExcel } = require('./excel');
 const { createCustomer, createSubscription, cancelSubscription, createPortalSession, handleWebhookEvent, getTierFeatures } = require('./stripe');
@@ -1495,6 +1495,62 @@ app.post('/scenarios/bulk-import', authMiddleware, tierMiddleware('enterprise'),
 app.post('/scenarios/:id/send-email', authMiddleware, tierMiddleware('professional'), async (req, res) => {
   try {
     return res.status(404).json({ error: 'Scenario not found' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/scenarios/:id/email', authMiddleware, async (req, res) => {
+  try {
+    const scenarioId = req.params.id;
+    const { recipient_email, subject, scheduled_at } = req.body;
+
+    if (!recipient_email) {
+      return res.status(400).json({ error: 'recipient_email is required' });
+    }
+
+    if (!validateEmail(recipient_email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    const scenario = await pool.query('SELECT * FROM scenarios WHERE id = $1', [scenarioId]);
+    if (scenario.rows.length === 0) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+
+    const emailSubject = subject || `Debt Recycling Strategy Report — ${scenario.rows[0].name}`;
+    const userId = req.user.userId || req.user.user_id;
+
+    const htmlBody = `<h1>Your Debt Recycling Strategy Report</h1>
+<p>Dear Client,</p>
+<p>Please find your strategy report for scenario "${scenario.rows[0].name}".</p>
+<p><a href="https://d1p3am5bl1sho7.cloudfront.net/portal">Review your strategy in the client portal</a></p>
+<p>Best regards,<br/>Your Financial Advisor</p>
+<p style="font-size:11px;color:#888;">This is not financial advice. Please consult a licensed advisor.</p>`;
+
+    const textBody = `Your Debt Recycling Strategy Report\n\nScenario: ${scenario.rows[0].name}\n\nView in portal: https://d1p3am5bl1sho7.cloudfront.net/portal`;
+
+    const emailLog = await createEmailLog({
+      user_id: userId,
+      recipient_email,
+      subject: emailSubject,
+      html_body: htmlBody,
+      text_body: textBody,
+      status: scheduled_at ? 'scheduled' : 'sent',
+    });
+
+    const response = {
+      message: scheduled_at ? 'Email scheduled' : 'Email sent',
+      email_log_id: emailLog.id,
+      subject: emailSubject,
+      recipient: recipient_email,
+    };
+
+    if (scheduled_at) {
+      response.scheduled_at = scheduled_at;
+    }
+
+    res.json(response);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

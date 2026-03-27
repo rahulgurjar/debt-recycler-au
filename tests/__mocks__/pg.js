@@ -113,6 +113,19 @@ db.public.none(`
     sent_at TIMESTAMP DEFAULT NOW()
   );
 
+  CREATE TABLE IF NOT EXISTS email_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    recipient_email TEXT NOT NULL,
+    subject TEXT,
+    html_body TEXT,
+    text_body TEXT,
+    status TEXT DEFAULT 'sent',
+    error_reason TEXT,
+    ses_message_id TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+
   CREATE TABLE IF NOT EXISTS subscriptions (
     id SERIAL PRIMARY KEY,
     customer_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
