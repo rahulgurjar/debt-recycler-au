@@ -362,6 +362,57 @@ app.patch('/workspace/settings', authMiddleware, adminMiddleware, async (req, re
   }
 });
 
+// Admin Analytics
+
+let analyticsCache = null;
+let analyticsCacheTime = 0;
+const ANALYTICS_CACHE_TTL = 86400000;
+
+app.get('/admin/analytics', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const now = Date.now();
+    if (analyticsCache && now - analyticsCacheTime < ANALYTICS_CACHE_TTL) {
+      return res.json(analyticsCache);
+    }
+
+    const tierPrices = { starter: 500, professional: 1500, enterprise: 3000 };
+
+    const ago7 = new Date(now - 7 * 86400000).toISOString();
+    const ago30 = new Date(now - 30 * 86400000).toISOString();
+
+    const [totalRes, signups7Res, signups30Res, tierRes, topRes] = await Promise.all([
+      pool.query('SELECT COUNT(*) AS count FROM users'),
+      pool.query('SELECT COUNT(*) AS count FROM users WHERE created_at >= $1', [ago7]),
+      pool.query('SELECT COUNT(*) AS count FROM users WHERE created_at >= $1', [ago30]),
+      pool.query("SELECT COALESCE(subscription_tier, 'free') AS tier, COUNT(*) AS count FROM users GROUP BY subscription_tier"),
+      pool.query('SELECT id, email, company_name, subscription_tier FROM users ORDER BY id DESC LIMIT 10'),
+    ]);
+
+    const tierBreakdown = { starter: 0, professional: 0, enterprise: 0, free: 0 };
+    let mrr = 0;
+    for (const row of tierRes.rows) {
+      const tier = row.tier || 'free';
+      tierBreakdown[tier] = parseInt(row.count, 10);
+      mrr += (tierPrices[tier] || 0) * parseInt(row.count, 10);
+    }
+
+    analyticsCache = {
+      total_users: parseInt(totalRes.rows[0].count, 10),
+      signups_last_7_days: parseInt(signups7Res.rows[0].count, 10),
+      signups_last_30_days: parseInt(signups30Res.rows[0].count, 10),
+      tier_breakdown: tierBreakdown,
+      mrr,
+      arr: mrr * 12,
+      top_customers: topRes.rows,
+    };
+    analyticsCacheTime = now;
+
+    res.json(analyticsCache);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Debug endpoint (for testing only, remove in production)
 app.get('/auth/debug/user', async (req, res) => {
   const { email } = req.query;
