@@ -7,6 +7,7 @@ import Signup from './components/Signup';
 import ClientsTable from './components/ClientsTable';
 import AnalyticsCards from './components/AnalyticsCards';
 import WorkspaceManager from './components/WorkspaceManager';
+import ScenarioForm from './components/ScenarioForm';
 import './App.css';
 
 function App() {
@@ -86,6 +87,12 @@ function App() {
           Saved Scenarios
         </button>
         <button
+          className={`nav-btn ${activeTab === 'new-scenario' ? 'active' : ''}`}
+          onClick={() => setActiveTab('new-scenario')}
+        >
+          New Scenario
+        </button>
+        <button
           className={`nav-btn ${activeTab === 'clients' ? 'active' : ''}`}
           onClick={() => setActiveTab('clients')}
         >
@@ -116,6 +123,7 @@ function App() {
       <main className="app-main">
         {activeTab === 'calculator' && <Dashboard />}
         {activeTab === 'scenarios' && <ScenarioList />}
+        {activeTab === 'new-scenario' && <ScenarioForm onScenarioCreated={() => setActiveTab('scenarios')} />}
         {activeTab === 'clients' && <ClientsTable />}
         {activeTab === 'analytics' && <AnalyticsCards />}
         {activeTab === 'workspace' && <WorkspaceManager userRole={user?.role} />}
