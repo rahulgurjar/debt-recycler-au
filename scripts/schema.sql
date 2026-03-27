@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS clients (
 
 CREATE TABLE IF NOT EXISTS scenarios (
   id SERIAL PRIMARY KEY,
-  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
@@ -89,7 +89,6 @@ CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
 CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(reset_token);
 CREATE INDEX IF NOT EXISTS idx_clients_customer ON clients(customer_id);
 CREATE INDEX IF NOT EXISTS idx_scenarios_user ON scenarios(user_id);
-CREATE INDEX IF NOT EXISTS idx_scenarios_client ON scenarios(client_id);
 CREATE INDEX IF NOT EXISTS idx_projections_scenario ON projections(scenario_id);
 CREATE INDEX IF NOT EXISTS idx_scenario_versions_scenario ON scenario_versions(scenario_id);
 CREATE INDEX IF NOT EXISTS idx_scenario_versions_created ON scenario_versions(created_at DESC);
