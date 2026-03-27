@@ -148,17 +148,50 @@ async function deleteScenario(scenarioId) {
  * User Management Functions
  */
 
-async function createUser(email, passwordHash, companyName = 'Company', role = 'admin') {
+async function createUser(emailOrObj, passwordHash, companyName = 'Company', role = 'admin') {
   try {
+    let email, hash, company, userRole, firstName, lastName, subscriptionTier, trialEndsAt;
+    if (emailOrObj && typeof emailOrObj === 'object') {
+      email = emailOrObj.email;
+      hash = emailOrObj.password_hash;
+      company = emailOrObj.company_name || 'Company';
+      userRole = emailOrObj.role || 'advisor';
+      firstName = emailOrObj.first_name || null;
+      lastName = emailOrObj.last_name || null;
+      subscriptionTier = 'subscription_tier' in emailOrObj ? emailOrObj.subscription_tier : (emailOrObj.trial_ends_at ? null : 'professional');
+      trialEndsAt = emailOrObj.trial_ends_at || null;
+    } else {
+      email = emailOrObj;
+      hash = passwordHash;
+      company = companyName;
+      userRole = role;
+      firstName = null;
+      lastName = null;
+      subscriptionTier = null;
+      trialEndsAt = null;
+    }
     const result = await pool.query(
-      `INSERT INTO users (email, password_hash, company_name, role)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, email, password_hash, company_name, role`,
-      [email, passwordHash, companyName, role]
+      `INSERT INTO users (email, password_hash, company_name, role, first_name, last_name, subscription_tier, trial_ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, email, password_hash, company_name, role, first_name, last_name, subscription_tier, subscription_status, stripe_customer_id, current_period_end, default_payment_method_id, monthly_scenarios_used, trial_ends_at`,
+      [email, hash, company, userRole, firstName, lastName, subscriptionTier, trialEndsAt]
     );
     return result.rows[0];
   } catch (error) {
     console.error('Error creating user:', error);
+    throw error;
+  }
+}
+
+async function getUser(userId) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM users WHERE id = $1',
+      [userId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error fetching user by ID:', error);
     throw error;
   }
 }
@@ -172,6 +205,19 @@ async function getUserByEmail(email) {
     return result.rows[0] || null;
   } catch (error) {
     console.error('Error fetching user:', error);
+    throw error;
+  }
+}
+
+async function getAdminByCompany(companyName) {
+  try {
+    const result = await pool.query(
+      "SELECT id FROM users WHERE company_name = $1 AND role = 'admin' LIMIT 1",
+      [companyName]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error checking company admin:', error);
     throw error;
   }
 }
@@ -192,8 +238,8 @@ async function addResetToken(userId, resetToken, expiryTime) {
   try {
     await pool.query(
       `INSERT INTO password_resets (user_id, reset_token, expires_at)
-       VALUES ($1, $2, to_timestamp($3/1000.0))`,
-      [userId, resetToken, expiryTime]
+       VALUES ($1, $2, $3)`,
+      [userId, resetToken, new Date(expiryTime)]
     );
   } catch (error) {
     console.error('Error adding reset token:', error);
@@ -240,7 +286,7 @@ async function getScenarioVersions(scenarioId, limit = 50, offset = 0) {
       `SELECT id, scenario_id, parameters, created_by, created_at
        FROM scenario_versions
        WHERE scenario_id = $1
-       ORDER BY created_at DESC
+       ORDER BY id DESC
        LIMIT $2 OFFSET $3`,
       [scenarioId, limit, offset]
     );
@@ -363,6 +409,47 @@ async function healthCheck() {
   }
 }
 
+async function createClient(clientData) {
+  try {
+    const name = clientData.first_name
+      ? `${clientData.first_name} ${clientData.last_name || ''}`.trim()
+      : clientData.name || 'Client';
+    const result = await pool.query(
+      `INSERT INTO clients (customer_id, name, email)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [clientData.user_id || clientData.customer_id, name, clientData.email || null]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error creating client:', error);
+    throw error;
+  }
+}
+
+async function createScenario(scenarioData) {
+  try {
+    const params = scenarioData.parameters || {};
+    const result = await pool.query(
+      `INSERT INTO scenarios (user_id, client_id, name, investment_amount, interest_rate, calculation_result)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        scenarioData.user_id || null,
+        scenarioData.client_id || null,
+        scenarioData.name || 'Scenario',
+        params.investment_amount || null,
+        params.interest_rate || null,
+        JSON.stringify(params),
+      ]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error creating scenario:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   pool,
   saveScenario,
@@ -371,6 +458,7 @@ module.exports = {
   deleteScenario,
   healthCheck,
   createUser,
+  getUser,
   getUserByEmail,
   updateUserPassword,
   addResetToken,
@@ -382,4 +470,7 @@ module.exports = {
   updateUserSubscription,
   createEmailLog,
   getEmailLog,
+  getAdminByCompany,
+  createClient,
+  createScenario,
 };

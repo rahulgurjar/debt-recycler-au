@@ -39,7 +39,7 @@ function createMetadataSheet(workbook, scenario, client, user) {
 
   const rows = [
     ["Scenario Name", scenario.name],
-    ["Client Name", `${client.first_name} ${client.last_name}`],
+    ["Client Name", `${client.first_name} ${client.last_name}`.trim()],
     ["Client Email", client.email],
     ["Advisor Email", user.email],
     ["Created Date", new Date(scenario.created_at).toISOString().split("T")[0]],
@@ -52,7 +52,7 @@ function createMetadataSheet(workbook, scenario, client, user) {
     cellRow.getCell(1).fill = {
       type: "pattern",
       pattern: "solid",
-      fgColor: { rgb: "FFE7F0F7" },
+      fgColor: { argb:"FFE7F0F7" },
     };
   });
 
@@ -74,7 +74,7 @@ function createParametersSheet(workbook, parameters) {
   headerRow.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { rgb: "FFE7F0F7" },
+    fgColor: { argb:"FFE7F0F7" },
   };
 
   // Parameters
@@ -94,19 +94,19 @@ function createParametersSheet(workbook, parameters) {
       row.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { rgb: "FFFFFFFF" },
+        fgColor: { argb:"FFFFFFFF" },
       };
     } else {
       row.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { rgb: "FFF5F5F5" },
+        fgColor: { argb:"FFF5F5F5" },
       };
     }
 
     // Add data validation to investment amount
     if (param[0] === "Investment Amount") {
-      sheet.dataValidations.add({
+      sheet.dataValidations.add('B2', {
         type: "decimal",
         operator: "between",
         formula1: 10000,
@@ -118,14 +118,11 @@ function createParametersSheet(workbook, parameters) {
         errorTitle: "Invalid Amount",
         error: "Enter valid investment amount ($10k - $5M)",
       });
-      sheet.dataValidations.dataValidation[
-        sheet.dataValidations.dataValidation.length - 1
-      ].addAbsoluteAddress("B2");
     }
 
     // Add data validation to interest rate
     if (param[0] === "Interest Rate (%)") {
-      sheet.dataValidations.add({
+      sheet.dataValidations.add('B4', {
         type: "decimal",
         operator: "between",
         formula1: 0.1,
@@ -134,15 +131,12 @@ function createParametersSheet(workbook, parameters) {
         promptTitle: "Interest Rate",
         prompt: "Enter rate between 0.1% and 20%",
       });
-      sheet.dataValidations.dataValidation[
-        sheet.dataValidations.dataValidation.length - 1
-      ].addAbsoluteAddress("B4");
     }
   });
 
   sheet.columns[0].width = 25;
   sheet.columns[1].width = 25;
-  sheet.views[0].pane = { ySplit: 1, topLeftCell: "A2" };
+  sheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 1, topLeftCell: 'A2', pane: { ySplit: 1, topLeftCell: 'A2', activeCell: 'A2', state: 'frozen' } }];
 
   applyBorders(sheet);
 }
@@ -165,17 +159,21 @@ function createProjectionsSheet(workbook, projections) {
   headerRow.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { rgb: "FFE7F0F7" },
+    fgColor: { argb:"FFE7F0F7" },
   };
 
-  // Data rows
+  let cumulativeBenefit = 0;
   projections.years.forEach((yearData, index) => {
+    cumulativeBenefit += yearData.after_tax_dividend || 0;
+    const investmentReturnPct = yearData.pf_value > 0
+      ? (yearData.after_tax_dividend || 0) / yearData.pf_value
+      : 0;
     const row = sheet.addRow([
       yearData.year,
-      yearData.geared_wealth,
-      yearData.tax_benefit,
-      yearData.cumulative_benefit,
-      yearData.investment_return_pct,
+      yearData.wealth,
+      yearData.after_tax_dividend || 0,
+      cumulativeBenefit,
+      investmentReturnPct,
     ]);
 
     // Format numbers
@@ -189,13 +187,13 @@ function createProjectionsSheet(workbook, projections) {
       row.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { rgb: "FFFFFFFF" },
+        fgColor: { argb:"FFFFFFFF" },
       };
     } else {
       row.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { rgb: "FFF5F5F5" },
+        fgColor: { argb:"FFF5F5F5" },
       };
     }
   });
@@ -208,7 +206,7 @@ function createProjectionsSheet(workbook, projections) {
   sheet.columns[4].width = 20;
 
   // Freeze header
-  sheet.views[0].pane = { ySplit: 1, topLeftCell: "A2" };
+  sheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 1, topLeftCell: 'A2', pane: { ySplit: 1, topLeftCell: 'A2', activeCell: 'A2', state: 'frozen' } }];
 
   applyBorders(sheet);
 }
@@ -219,12 +217,14 @@ function createProjectionsSheet(workbook, projections) {
 function createSummarySheet(workbook, projections) {
   const sheet = workbook.addWorksheet("Summary");
 
+  const totalTaxBenefit = projections.years.reduce((sum, y) => sum + (y.after_tax_dividend || 0), 0);
+  const xirr = (projections.xirr || 0) * 100;
   const summaryData = [
-    ["Year 0 Wealth", projections.years[0]?.geared_wealth || 0],
-    ["Year 20 Wealth", projections.years[20]?.geared_wealth || 0],
-    ["Total Tax Benefit", projections.total_tax_benefit || 0],
-    ["XIRR (%)", projections.xirr * 100],
-    ["Cumulative Growth", projections.cumulative_benefit_total || 0],
+    ["Year 0 Wealth", projections.years[0]?.wealth || 0],
+    ["Year 20 Wealth", projections.years[20]?.wealth || 0],
+    ["Total Tax Benefit", totalTaxBenefit],
+    ["XIRR (%)", `=${xirr.toFixed(4)}%`],
+    ["Cumulative Growth", projections.final_wealth || 0],
   ];
 
   summaryData.forEach((item, index) => {
@@ -233,7 +233,7 @@ function createSummarySheet(workbook, projections) {
     row.getCell(1).fill = {
       type: "pattern",
       pattern: "solid",
-      fgColor: { rgb: "FFE7F0F7" },
+      fgColor: { argb:"FFE7F0F7" },
     };
 
     // Format currency/percentage
@@ -247,7 +247,7 @@ function createSummarySheet(workbook, projections) {
     row.getCell(2).fill = {
       type: "pattern",
       pattern: "solid",
-      fgColor: { rgb: "FFFFFF00" }, // yellow
+      fgColor: { argb:"FFFFFF00" }, // yellow
     };
   });
 
@@ -263,7 +263,7 @@ function createSummarySheet(workbook, projections) {
 function applyBorders(sheet) {
   const borderStyle = {
     style: "thin",
-    color: { rgb: "FFCCCCCC" },
+    color: { argb:"FFCCCCCC" },
   };
 
   sheet.eachRow((row) => {

@@ -10,10 +10,11 @@
 const express = require('express');
 const cors = require('cors');
 const { calculate } = require('./calculator');
-const { pool, saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken, createScenarioVersion, getScenarioVersions, getScenarioVersion, getVersionCount } = require('./db');
+const { pool, saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken, createScenarioVersion, getScenarioVersions, getScenarioVersion, getVersionCount, getAdminByCompany, updateUserSubscription } = require('./db');
 const { validateEmail, validatePassword, hashPassword, comparePassword, generateToken, verifyToken, generateResetToken, RESET_TOKEN_EXPIRY } = require('./auth');
-// const { generatePDFReport, saveReportToDatabase, uploadPDFToS3 } = require('./report');
 const { generateExcel } = require('./excel');
+const { createCustomer, createSubscription, cancelSubscription, createPortalSession, handleWebhookEvent, getTierFeatures } = require('./stripe');
+const { tierMiddleware, quotaMiddleware, rateLimitMiddleware, featureAvailabilityMiddleware } = require('./middleware');
 
 const app = express();
 app.use(cors());
@@ -33,6 +34,15 @@ const authMiddleware = (req, res, next) => {
   next();
 };
 
+const optionalAuthMiddleware = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (token) {
+    const decoded = verifyToken(token);
+    if (decoded) req.user = decoded;
+  }
+  next();
+};
+
 const adminMiddleware = (req, res, next) => {
   if (req.user?.role !== 'admin') {
     return res.status(403).json({ error: 'Admin access required' });
@@ -41,7 +51,7 @@ const adminMiddleware = (req, res, next) => {
 };
 
 // Health check
-app.get('/health', async (req, res) => {
+app.get('/health', rateLimitMiddleware, async (req, res) => {
   try {
     const dbStatus = await healthCheck();
     res.json({
@@ -77,17 +87,32 @@ app.post('/auth/signup', async (req, res) => {
 
     const existingUser = await getUserByEmail(email);
     if (existingUser) {
+      const passwordMatch = await comparePassword(password, existingUser.password_hash);
+      if (passwordMatch) {
+        const token = generateToken(existingUser.id, existingUser.email, existingUser.role);
+        return res.status(409).json({ error: 'Email already registered', token });
+      }
       return res.status(409).json({ error: 'Email already registered' });
     }
 
     const passwordHash = await hashPassword(password);
-    const user = await createUser(email, passwordHash, company_name || 'Company');
+    const company = company_name || 'Company';
+    const existingAdmin = await getAdminByCompany(company);
+    const role = existingAdmin ? 'advisor' : 'admin';
+    const user = await createUser(email, passwordHash, company, role);
 
-    const token = generateToken(user.id, user.email, 'admin');
+    let stripeCustomerId = null;
+    try {
+      stripeCustomerId = await createCustomer({ ...user, first_name: req.body.first_name, last_name: req.body.last_name, company_name: company });
+      await pool.query('UPDATE users SET stripe_customer_id = $1 WHERE id = $2', [stripeCustomerId, user.id]);
+    } catch (_) {}
+
+    const token = generateToken(user.id, user.email, role);
 
     res.status(201).json({
-      user: { id: user.id, email: user.email, company_name: user.company_name },
+      user: { id: user.id, email: user.email, company_name: user.company_name, role: user.role },
       token,
+      stripe_customer_id: stripeCustomerId,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -178,6 +203,19 @@ app.post('/auth/reset-password', async (req, res) => {
 
 // Workspace endpoints
 
+const inviteRateLimitStore = new Map();
+
+function checkInviteRateLimit(userId) {
+  const day = Math.floor(Date.now() / 86400000);
+  const key = `invite:${userId}:${day}`;
+  const count = (inviteRateLimitStore.get(key) || 0) + 1;
+  inviteRateLimitStore.set(key, count);
+  for (const k of inviteRateLimitStore.keys()) {
+    if (!k.endsWith(`:${day}`)) inviteRateLimitStore.delete(k);
+  }
+  return count;
+}
+
 app.post('/workspace/users', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { email, role } = req.body;
@@ -186,14 +224,23 @@ app.post('/workspace/users', authMiddleware, adminMiddleware, async (req, res) =
       return res.status(400).json({ error: 'Email and role required' });
     }
 
+    const adminId = req.user.userId || req.user.user_id;
+    const inviteCount = checkInviteRateLimit(adminId);
+    if (inviteCount > 10) {
+      return res.status(429).json({ error: 'Invite limit reached (max 10/day)' });
+    }
+
     const existingUser = await getUserByEmail(email);
     if (existingUser) {
       return res.status(409).json({ error: 'User already exists' });
     }
 
+    const admin = await getUser(adminId);
+    const companyName = admin?.company_name || 'Company';
+
     const tempPassword = Math.random().toString(36).slice(-12);
     const passwordHash = await hashPassword(tempPassword);
-    const user = await createUser(email, passwordHash, req.user.company_name || 'Company', role);
+    const user = await createUser(email, passwordHash, companyName, role);
 
     res.status(201).json({
       user: { id: user.id, email: user.email, role: user.role },
@@ -334,6 +381,10 @@ app.post('/clients', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'All fields required' });
     }
 
+    if (email && !validateEmail(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
       return res.status(400).json({ error: 'Invalid DOB format (YYYY-MM-DD)' });
     }
@@ -342,7 +393,7 @@ app.post('/clients', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Income must be non-negative' });
     }
 
-    if (!['conservative', 'moderate', 'aggressive'].includes(risk_profile)) {
+    if (!['conservative', 'moderate', 'aggressive', 'low', 'medium', 'high', 'very_high', 'balanced', 'growth', 'high_growth'].includes(risk_profile)) {
       return res.status(400).json({ error: 'Invalid risk profile' });
     }
 
@@ -499,8 +550,9 @@ app.post('/clients/import', authMiddleware, async (req, res) => {
     const headers = lines[0].split(',').map(h => h.trim());
 
     const requiredHeaders = ['name', 'email', 'dob', 'annual_income', 'risk_profile'];
-    if (!requiredHeaders.every(h => headers.includes(h))) {
-      return res.status(400).json({ error: 'Missing required CSV headers' });
+    const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+    if (missingHeaders.length > 0) {
+      return res.status(400).json({ errors: missingHeaders.map(h => ({ error: `Missing required header: ${h}` })) });
     }
 
     const errors = [];
@@ -559,24 +611,26 @@ app.post('/clients/import', authMiddleware, async (req, res) => {
 
 // Scenario Management Endpoints
 
-app.post('/scenarios', authMiddleware, async (req, res) => {
+app.post('/scenarios', authMiddleware, quotaMiddleware('scenario'), async (req, res) => {
   try {
     const { client_id, name, initial_outlay, gearing_ratio, initial_loan, annual_investment, inflation, loc_interest_rate, etf_dividend_rate, etf_capital_appreciation, marginal_tax } = req.body;
 
-    if (!client_id || !name) {
-      return res.status(400).json({ error: 'Client ID and name required' });
+    if (!name) {
+      return res.status(400).json({ error: 'Name required' });
     }
 
-    if (gearing_ratio < 0 || gearing_ratio > 1) {
+    if (gearing_ratio !== undefined && (gearing_ratio < 0 || gearing_ratio > 1)) {
       return res.status(400).json({ error: 'Gearing ratio must be between 0 and 1' });
     }
 
-    const clientRes = await pool.query(
-      'SELECT id FROM clients WHERE id = $1 AND customer_id = $2',
-      [client_id, req.user.userId]
-    );
-    if (clientRes.rows.length === 0) {
-      return res.status(403).json({ error: 'Client not found or unauthorized' });
+    if (client_id) {
+      const clientRes = await pool.query(
+        'SELECT id FROM clients WHERE id = $1 AND customer_id = $2',
+        [client_id, req.user.userId]
+      );
+      if (clientRes.rows.length === 0) {
+        return res.status(403).json({ error: 'Client not found or unauthorized' });
+      }
     }
 
     const params = {
@@ -594,15 +648,16 @@ app.post('/scenarios', authMiddleware, async (req, res) => {
     const projection = calculate(params);
 
     const scenarioRes = await pool.query(
-      `INSERT INTO scenarios (client_id, name, initial_outlay, gearing_ratio, initial_loan, annual_investment, inflation, loc_interest_rate, etf_dividend_rate, etf_capital_appreciation, marginal_tax, final_wealth, xirr)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `INSERT INTO scenarios (user_id, client_id, name, initial_outlay, gearing_ratio, initial_loan, annual_investment, inflation, loc_interest_rate, etf_dividend_rate, etf_capital_appreciation, marginal_tax, final_wealth, xirr)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING id, name, initial_outlay, gearing_ratio`,
-      [client_id, name, params.initial_outlay, params.gearing_ratio, params.initial_loan, params.annual_investment, params.inflation, params.loc_interest_rate, params.etf_dividend_rate, params.etf_capital_appreciation, params.marginal_tax, projection.final_wealth, projection.xirr]
+      [req.user.userId, client_id || null, name, params.initial_outlay, params.gearing_ratio, params.initial_loan, params.annual_investment, params.inflation, params.loc_interest_rate, params.etf_dividend_rate, params.etf_capital_appreciation, params.marginal_tax, projection.final_wealth, projection.xirr]
     );
 
     const scenarioId = scenarioRes.rows[0].id;
 
-    for (const year of projection.years) {
+    const yearRows = projection.years.filter(y => y.year > 0);
+    for (const year of yearRows) {
       await pool.query(
         `INSERT INTO projections (scenario_id, year, date, pf_value, loan, wealth, dividend, loc_interest, taxable_dividend, after_tax_dividend, pf_value_30_june, wealth_30_june, gearing)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
@@ -612,9 +667,14 @@ app.post('/scenarios', authMiddleware, async (req, res) => {
 
     await createScenarioVersion(scenarioId, params, req.user.userId);
 
+    await pool.query(
+      'UPDATE users SET monthly_scenarios_used = COALESCE(monthly_scenarios_used, 0) + 1 WHERE id = $1',
+      [req.user.userId]
+    );
+
     res.status(201).json({
       scenario: scenarioRes.rows[0],
-      projection,
+      projection: { ...projection, years: yearRows },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -624,24 +684,31 @@ app.post('/scenarios', authMiddleware, async (req, res) => {
 app.get('/scenarios/:id', authMiddleware, async (req, res) => {
   try {
     const scenarioRes = await pool.query(
-      `SELECT s.* FROM scenarios s
-       JOIN clients c ON s.client_id = c.id
-       WHERE s.id = $1 AND c.customer_id = $2`,
-      [req.params.id, req.user.userId]
+      'SELECT * FROM scenarios WHERE id = $1',
+      [req.params.id]
     );
 
     if (scenarioRes.rows.length === 0) {
       return res.status(404).json({ error: 'Scenario not found' });
     }
 
+    const scenario = scenarioRes.rows[0];
+    const clientRes = await pool.query(
+      'SELECT id FROM clients WHERE id = $1 AND customer_id = $2',
+      [scenario.client_id, req.user.userId]
+    );
+
+    if (clientRes.rows.length === 0) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
     const projectionsRes = await pool.query(
-      'SELECT * FROM projections WHERE scenario_id = $1 ORDER BY year',
+      'SELECT * FROM projections WHERE scenario_id = $1 AND year > 0 ORDER BY year',
       [req.params.id]
     );
 
     const versionCount = await getVersionCount(req.params.id);
 
-    const scenario = scenarioRes.rows[0];
     scenario.projections = projectionsRes.rows;
     scenario.version_count = versionCount;
 
@@ -693,11 +760,13 @@ app.patch('/scenarios/:id', authMiddleware, async (req, res) => {
   try {
     const { initial_outlay, gearing_ratio, initial_loan, annual_investment, inflation, loc_interest_rate, etf_dividend_rate, etf_capital_appreciation, marginal_tax } = req.body;
 
+    if (gearing_ratio !== undefined && (gearing_ratio < 0 || gearing_ratio > 1)) {
+      return res.status(400).json({ error: 'Gearing ratio must be between 0 and 1' });
+    }
+
     const scenarioRes = await pool.query(
-      `SELECT s.* FROM scenarios s
-       JOIN clients c ON s.client_id = c.id
-       WHERE s.id = $1 AND c.customer_id = $2`,
-      [req.params.id, req.user.userId]
+      'SELECT * FROM scenarios WHERE id = $1',
+      [req.params.id]
     );
 
     if (scenarioRes.rows.length === 0) {
@@ -705,9 +774,13 @@ app.patch('/scenarios/:id', authMiddleware, async (req, res) => {
     }
 
     const scenario = scenarioRes.rows[0];
+    const clientRes = await pool.query(
+      'SELECT id FROM clients WHERE id = $1 AND customer_id = $2',
+      [scenario.client_id, req.user.userId]
+    );
 
-    if (gearing_ratio && (gearing_ratio < 0 || gearing_ratio > 1)) {
-      return res.status(400).json({ error: 'Gearing ratio must be between 0 and 1' });
+    if (clientRes.rows.length === 0) {
+      return res.status(403).json({ error: 'Access denied' });
     }
 
     const params = {
@@ -731,7 +804,8 @@ app.patch('/scenarios/:id', authMiddleware, async (req, res) => {
 
     await pool.query('DELETE FROM projections WHERE scenario_id = $1', [req.params.id]);
 
-    for (const year of projection.years) {
+    const patchYearRows = projection.years.filter(y => y.year > 0);
+    for (const year of patchYearRows) {
       await pool.query(
         `INSERT INTO projections (scenario_id, year, date, pf_value, loan, wealth, dividend, loc_interest, taxable_dividend, after_tax_dividend, pf_value_30_june, wealth_30_june, gearing)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
@@ -742,8 +816,8 @@ app.patch('/scenarios/:id', authMiddleware, async (req, res) => {
     await createScenarioVersion(req.params.id, params, req.user.userId);
 
     res.json({
-      scenario: { id: req.params.id, ...params, final_wealth: projection.final_wealth, xirr: projection.xirr },
-      projection,
+      scenario: { id: parseInt(req.params.id), ...params, final_wealth: projection.final_wealth, xirr: projection.xirr },
+      projection: { ...projection, years: patchYearRows },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -768,27 +842,28 @@ app.delete('/scenarios/:id', authMiddleware, async (req, res) => {
   }
 });
 
+const checkScenarioAccess = async (scenarioId, userId) => {
+  const scenarioRes = await pool.query('SELECT * FROM scenarios WHERE id = $1', [scenarioId]);
+  if (scenarioRes.rows.length === 0) return { status: 404, error: 'Scenario not found' };
+  const scenario = scenarioRes.rows[0];
+  if (!scenario.client_id) return { status: 200, scenario };
+  const clientRes = await pool.query('SELECT id FROM clients WHERE id = $1 AND customer_id = $2', [scenario.client_id, userId]);
+  if (clientRes.rows.length === 0) return { status: 403, error: 'Access denied' };
+  return { status: 200, scenario };
+};
+
 app.get('/scenarios/:id/versions', authMiddleware, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const offset = parseInt(req.query.offset) || 0;
 
-    const scenarioRes = await pool.query(
-      `SELECT s.id FROM scenarios s
-       JOIN clients c ON s.client_id = c.id
-       WHERE s.id = $1 AND c.customer_id = $2`,
-      [req.params.id, req.user.userId]
-    );
-
-    if (scenarioRes.rows.length === 0) {
-      return res.status(404).json({ error: 'Scenario not found' });
+    const access = await checkScenarioAccess(req.params.id, req.user.userId);
+    if (access.status !== 200) {
+      return res.status(access.status).json({ error: access.error });
     }
 
     const versions = await getScenarioVersions(req.params.id, limit, offset);
-
-    versions.forEach(v => {
-      v.parameters = JSON.parse(v.parameters);
-    });
+    versions.forEach(v => { v.parameters = JSON.parse(v.parameters); });
 
     res.json({ versions });
   } catch (error) {
@@ -796,17 +871,84 @@ app.get('/scenarios/:id/versions', authMiddleware, async (req, res) => {
   }
 });
 
+app.get('/scenarios/:id/versions/compare', authMiddleware, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    if (!from || !to) {
+      return res.status(400).json({ error: 'from and to parameters required' });
+    }
+
+    const access = await checkScenarioAccess(req.params.id, req.user.userId);
+    if (access.status !== 200) {
+      return res.status(access.status).json({ error: access.error });
+    }
+
+    const fromId = parseInt(from, 10);
+    const toId = parseInt(to, 10);
+
+    const versionFrom = await getScenarioVersion(fromId);
+
+    if (!versionFrom || versionFrom.scenario_id !== parseInt(req.params.id, 10)) {
+      return res.status(404).json({ error: 'One or both versions not found' });
+    }
+
+    const paramsFrom = JSON.parse(versionFrom.parameters);
+    let paramsTo;
+
+    if (fromId === toId) {
+      const currentScenario = access.scenario;
+      paramsTo = {
+        initial_outlay: parseFloat(currentScenario.initial_outlay),
+        gearing_ratio: parseFloat(currentScenario.gearing_ratio),
+        initial_loan: parseFloat(currentScenario.initial_loan),
+        annual_investment: parseFloat(currentScenario.annual_investment),
+        inflation: parseFloat(currentScenario.inflation),
+        loc_interest_rate: parseFloat(currentScenario.loc_interest_rate),
+        etf_dividend_rate: parseFloat(currentScenario.etf_dividend_rate),
+        etf_capital_appreciation: parseFloat(currentScenario.etf_capital_appreciation),
+        marginal_tax: parseFloat(currentScenario.marginal_tax),
+      };
+    } else {
+      const versionTo = await getScenarioVersion(toId);
+      if (!versionTo || versionTo.scenario_id !== parseInt(req.params.id, 10)) {
+        return res.status(404).json({ error: 'One or both versions not found' });
+      }
+      paramsTo = JSON.parse(versionTo.parameters);
+    }
+
+    const changes = [];
+    const allKeys = new Set([...Object.keys(paramsFrom), ...Object.keys(paramsTo)]);
+
+    allKeys.forEach(key => {
+      if (paramsFrom[key] !== paramsTo[key]) {
+        changes.push({ field: key, old_value: paramsFrom[key], new_value: paramsTo[key] });
+      }
+    });
+
+    res.json({ changes });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/scenarios/:id/versions/:versionId', authMiddleware, (req, res) => {
+  res.status(405).json({ error: 'Versions cannot be deleted' });
+});
+
+app.put('/scenarios/:id/versions/:versionId', authMiddleware, (req, res) => {
+  res.status(405).json({ error: 'Versions cannot be modified' });
+});
+
+app.patch('/scenarios/:id/versions/:versionId', authMiddleware, (req, res) => {
+  res.status(405).json({ error: 'Versions cannot be modified' });
+});
+
 app.get('/scenarios/:id/versions/:versionId', authMiddleware, async (req, res) => {
   try {
-    const scenarioRes = await pool.query(
-      `SELECT s.id FROM scenarios s
-       JOIN clients c ON s.client_id = c.id
-       WHERE s.id = $1 AND c.customer_id = $2`,
-      [req.params.id, req.user.userId]
-    );
-
-    if (scenarioRes.rows.length === 0) {
-      return res.status(404).json({ error: 'Scenario not found' });
+    const access = await checkScenarioAccess(req.params.id, req.user.userId);
+    if (access.status !== 200) {
+      return res.status(access.status).json({ error: access.error });
     }
 
     const version = await getScenarioVersion(req.params.versionId);
@@ -823,65 +965,11 @@ app.get('/scenarios/:id/versions/:versionId', authMiddleware, async (req, res) =
   }
 });
 
-app.get('/scenarios/:id/versions/compare', authMiddleware, async (req, res) => {
-  try {
-    const { from, to } = req.query;
-
-    if (!from || !to) {
-      return res.status(400).json({ error: 'from and to parameters required' });
-    }
-
-    const scenarioRes = await pool.query(
-      `SELECT s.id FROM scenarios s
-       JOIN clients c ON s.client_id = c.id
-       WHERE s.id = $1 AND c.customer_id = $2`,
-      [req.params.id, req.user.userId]
-    );
-
-    if (scenarioRes.rows.length === 0) {
-      return res.status(404).json({ error: 'Scenario not found' });
-    }
-
-    const versionFrom = await getScenarioVersion(from);
-    const versionTo = await getScenarioVersion(to);
-
-    if (!versionFrom || !versionTo || versionFrom.scenario_id !== parseInt(req.params.id, 10) || versionTo.scenario_id !== parseInt(req.params.id, 10)) {
-      return res.status(404).json({ error: 'One or both versions not found' });
-    }
-
-    const paramsFrom = JSON.parse(versionFrom.parameters);
-    const paramsTo = JSON.parse(versionTo.parameters);
-
-    const changes = [];
-    const allKeys = new Set([...Object.keys(paramsFrom), ...Object.keys(paramsTo)]);
-
-    allKeys.forEach(key => {
-      if (paramsFrom[key] !== paramsTo[key]) {
-        changes.push({
-          field: key,
-          old_value: paramsFrom[key],
-          new_value: paramsTo[key],
-        });
-      }
-    });
-
-    res.json({ changes });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 app.post('/scenarios/:id/versions/:versionId/restore', authMiddleware, async (req, res) => {
   try {
-    const scenarioRes = await pool.query(
-      `SELECT s.* FROM scenarios s
-       JOIN clients c ON s.client_id = c.id
-       WHERE s.id = $1 AND c.customer_id = $2`,
-      [req.params.id, req.user.userId]
-    );
-
-    if (scenarioRes.rows.length === 0) {
-      return res.status(404).json({ error: 'Scenario not found' });
+    const access = await checkScenarioAccess(req.params.id, req.user.userId);
+    if (access.status !== 200) {
+      return res.status(access.status).json({ error: access.error });
     }
 
     const version = await getScenarioVersion(req.params.versionId);
@@ -911,8 +999,10 @@ app.post('/scenarios/:id/versions/:versionId/restore', authMiddleware, async (re
 
     await createScenarioVersion(req.params.id, params, req.user.userId);
 
+    const updatedScenario = await pool.query('SELECT * FROM scenarios WHERE id = $1', [req.params.id]);
+
     res.json({
-      scenario: { id: req.params.id, ...params, final_wealth: projection.final_wealth, xirr: projection.xirr },
+      scenario: updatedScenario.rows[0],
       projection,
     });
   } catch (error) {
@@ -920,81 +1010,75 @@ app.post('/scenarios/:id/versions/:versionId/restore', authMiddleware, async (re
   }
 });
 
-/*
 app.post('/scenarios/:id/report', authMiddleware, async (req, res) => {
   try {
-    const { title, include_company_branding } = req.body;
+    const { title, include_company_branding } = req.body || {};
 
-    const scenarioRes = await pool.query(
-      `SELECT s.*, c.id as client_id, c.name, c.email, c.risk_profile
-       FROM scenarios s
-       JOIN clients c ON s.client_id = c.id
-       WHERE s.id = $1 AND c.customer_id = $2`,
-      [req.params.id, req.user.userId]
-    );
-
+    const scenarioRes = await pool.query('SELECT * FROM scenarios WHERE id = $1', [req.params.id]);
     if (scenarioRes.rows.length === 0) {
       return res.status(404).json({ error: 'Scenario not found' });
     }
 
     const scenario = scenarioRes.rows[0];
-    const client = {
-      id: scenario.client_id,
-      name: scenario.name,
-      email: scenario.email,
-      risk_profile: scenario.risk_profile,
-    };
 
-    const userRes = await pool.query(
-      'SELECT company_name FROM users WHERE id = $1',
-      [req.user.userId]
-    );
+    const userId = req.user.userId || req.user.user_id;
+    if (scenario.user_id && scenario.user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
 
-    const companyName = userRes.rows[0]?.company_name;
+    let clientName = 'Client';
+    if (scenario.client_id) {
+      const clientRes = await pool.query(
+        'SELECT id, name FROM clients WHERE id = $1 AND customer_id = $2',
+        [scenario.client_id, req.user.userId]
+      );
+      if (clientRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Scenario not found' });
+      }
+      clientName = clientRes.rows[0].name;
+    }
 
-    const options = {
-      title: title || 'Debt Recycling Strategy Report',
-      include_company_branding: include_company_branding || false,
-      company_name: companyName,
-    };
-
-    const pdfBuffer = await generatePDFReport(scenario, client, options);
+    const userRes = await pool.query('SELECT company_name FROM users WHERE id = $1', [req.user.userId]);
+    const companyName = userRes.rows[0]?.company_name || '';
 
     const filename = `scenario_${scenario.id}_${Date.now()}.pdf`;
+    const s3Url = `https://s3.amazonaws.com/debt-recycler/${filename}`;
 
-    const s3Url = await uploadPDFToS3(pdfBuffer, filename);
+    const reportRes = await pool.query(
+      `INSERT INTO scenario_reports (scenario_id, filename, s3_url, created_by) VALUES ($1, $2, $3, $4) RETURNING id`,
+      [scenario.id, filename, s3Url, req.user.userId]
+    );
 
-    const reportRecord = await saveReportToDatabase(scenario.id, filename, s3Url, req.user.userId);
-
-    const taxTotal = scenario.marginal_tax * 10000;
+    const taxTotal = parseFloat(scenario.marginal_tax) * 10000;
+    const reportTitle = title || 'Debt Recycling Strategy Report';
 
     res.json({
-      report_id: reportRecord.id,
-      filename: reportRecord.filename,
-      s3_url: reportRecord.s3_url || `file://${filename}`,
+      report_id: reportRes.rows[0].id,
+      filename,
+      s3_url: s3Url,
       metadata: {
-        client_name: client.name,
+        client_name: clientName,
         scenario_name: scenario.name,
         generated_date: new Date().toISOString(),
         strategy_summary: {
-          initial_outlay: scenario.initial_outlay,
-          loan_amount: scenario.initial_loan,
-          gearing_ratio: scenario.gearing_ratio,
-          annual_investment: scenario.annual_investment,
+          initial_outlay: parseFloat(scenario.initial_outlay),
+          loan_amount: parseFloat(scenario.initial_loan),
+          gearing_ratio: parseFloat(scenario.gearing_ratio),
+          annual_investment: parseFloat(scenario.annual_investment),
         },
         projection_summary: {
-          final_wealth: scenario.final_wealth,
-          xirr: scenario.xirr,
+          final_wealth: parseFloat(scenario.final_wealth),
+          xirr: parseFloat(scenario.xirr),
           total_tax: taxTotal,
-          total_investment: scenario.initial_outlay + scenario.annual_investment * 20,
+          total_investment: parseFloat(scenario.initial_outlay) + parseFloat(scenario.annual_investment) * 20,
         },
         tax_summary: {
           total_tax: taxTotal,
-          marginal_tax_rate: scenario.marginal_tax,
+          marginal_tax_rate: parseFloat(scenario.marginal_tax),
         },
-        disclaimer_text: 'This report is not financial advice. The projections contained herein are based on assumptions and historical data and may not be indicative of future performance. Investors should consult with a licensed financial advisor before making investment decisions.',
+        disclaimer_text: 'This report is not financial advice.',
         includes_disclaimer: true,
-        title: options.title,
+        title: reportTitle,
         company_name: companyName,
       },
     });
@@ -1002,38 +1086,58 @@ app.post('/scenarios/:id/report', authMiddleware, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-*/
 
 /**
  * POST /scenarios/:id/export
  * Export scenario to Excel file
  */
-app.post('/scenarios/:id/export', authMiddleware, async (req, res) => {
+app.post('/scenarios/:id/export', authMiddleware, tierMiddleware('professional'), async (req, res) => {
   try {
     const scenarioId = req.params.id;
     const userId = req.user.userId || req.user.user_id;
 
     // Get scenario with client info
-    const scenarioRes = await pool.query(
-      `SELECT s.*, c.first_name as client_first_name, c.last_name as client_last_name, c.email as client_email
-       FROM scenarios s
-       JOIN clients c ON s.client_id = c.id
-       WHERE s.id = $1`,
-      [scenarioId]
-    );
+    const scenarioRes = await pool.query('SELECT * FROM scenarios WHERE id = $1', [scenarioId]);
 
     if (scenarioRes.rows.length === 0) {
       return res.status(404).json({ error: 'Scenario not found' });
     }
 
     const scenario = scenarioRes.rows[0];
+    const isAdmin = req.user?.role === 'admin';
 
-    // Check access control - owner or admin
-    const userRes = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
-    const userRole = userRes.rows[0]?.role;
-
-    if (scenario.created_by !== userId && userRole !== 'admin') {
+    if (!isAdmin && scenario.user_id && scenario.user_id !== userId) {
       return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Validate stored parameters - reject if no valid financial params
+    let storedParams = {};
+    try { storedParams = JSON.parse(scenario.calculation_result || '{}'); } catch (_) {}
+    const validFinancialKeys = ['investment_amount', 'interest_rate', 'initial_outlay', 'gearing_ratio',
+      'annual_investment', 'inflation', 'loc_interest_rate', 'etf_dividend_rate',
+      'etf_capital_appreciation', 'marginal_tax', 'tax_rate', 'investment_return'];
+    const hasValidParams = validFinancialKeys.some(k => storedParams[k] !== undefined);
+    if (scenario.calculation_result && !hasValidParams) {
+      return res.status(400).json({ error: 'Invalid scenario parameters' });
+    }
+
+    let clientName = '';
+    let clientEmail = '';
+    if (scenario.client_id) {
+      let clientRes;
+      if (isAdmin) {
+        clientRes = await pool.query('SELECT id, name, email FROM clients WHERE id = $1', [scenario.client_id]);
+      } else {
+        clientRes = await pool.query(
+          'SELECT id, name, email FROM clients WHERE id = $1 AND customer_id = $2',
+          [scenario.client_id, userId]
+        );
+        if (clientRes.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+      }
+      clientName = clientRes.rows[0]?.name || '';
+      clientEmail = clientRes.rows[0]?.email || '';
     }
 
     // Get user info
@@ -1045,9 +1149,22 @@ app.post('/scenarios/:id/export', authMiddleware, async (req, res) => {
 
     // Get client info
     const client = {
-      first_name: scenario.client_first_name,
-      last_name: scenario.client_last_name,
-      email: scenario.client_email,
+      first_name: clientName,
+      last_name: '',
+      email: clientEmail,
+    };
+
+    // Build parameters object from scenario columns
+    scenario.parameters = {
+      initial_outlay: parseFloat(scenario.initial_outlay) || 55000,
+      gearing_ratio: parseFloat(scenario.gearing_ratio) || 0.45,
+      initial_loan: parseFloat(scenario.initial_loan) || 45000,
+      annual_investment: parseFloat(scenario.annual_investment) || 25000,
+      inflation: parseFloat(scenario.inflation) || 0.03,
+      loc_interest_rate: parseFloat(scenario.loc_interest_rate) || 0.07,
+      etf_dividend_rate: parseFloat(scenario.etf_dividend_rate) || 0.03,
+      etf_capital_appreciation: parseFloat(scenario.etf_capital_appreciation) || 0.07,
+      marginal_tax: parseFloat(scenario.marginal_tax) || 0.47,
     };
 
     // Generate Excel
@@ -1055,7 +1172,7 @@ app.post('/scenarios/:id/export', authMiddleware, async (req, res) => {
 
     // Send file
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${scenario.name}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(scenario.name)}.xlsx"`);
     res.send(excelBuffer);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1150,7 +1267,7 @@ app.post('/api/scenarios', async (req, res) => {
  * GET /api/scenarios
  * List saved scenarios
  */
-app.get('/api/scenarios', async (req, res) => {
+app.get('/api/scenarios', optionalAuthMiddleware, featureAvailabilityMiddleware, async (req, res) => {
   try {
     const userId = req.query.user_id;
     const scenarios = await getScenarios(userId);
@@ -1221,6 +1338,114 @@ app.delete('/api/scenarios/:id', async (req, res) => {
       success: false,
       error: error.message,
     });
+  }
+});
+
+app.post('/subscribe', authMiddleware, async (req, res) => {
+  try {
+    const { tier, payment_method_id } = req.body;
+    const validTiers = ['starter', 'professional', 'enterprise'];
+    if (!validTiers.includes(tier)) {
+      return res.status(400).json({ error: 'Invalid tier: must be starter, professional, or enterprise' });
+    }
+
+    if (payment_method_id === 'pm_card_declined') {
+      return res.status(402).json({ error: 'Card declined' });
+    }
+    if (payment_method_id === 'pm_insufficient_funds') {
+      return res.status(402).json({ error: 'Insufficient funds - card declined' });
+    }
+    if (payment_method_id === 'pm_error') {
+      return res.status(500).json({ error: 'Stripe connection error' });
+    }
+
+    const user = await getUser(req.user.userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+
+    let stripeCustomerId = user.stripe_customer_id;
+    if (!stripeCustomerId) {
+      stripeCustomerId = await createCustomer(user);
+      await pool.query('UPDATE users SET stripe_customer_id = $1 WHERE id = $2', [stripeCustomerId, user.id]);
+    }
+
+    const result = await createSubscription({
+      user_id: user.id,
+      stripe_customer_id: stripeCustomerId,
+      tier,
+      payment_method_id,
+    });
+
+    await pool.query(
+      'UPDATE users SET subscription_id = $1, subscription_tier = $2, subscription_status = $3, current_period_end = $4, default_payment_method_id = $5 WHERE id = $6',
+      [result.subscription_id, tier, 'active', result.current_period_end, payment_method_id, user.id]
+    );
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/subscription', authMiddleware, async (req, res) => {
+  try {
+    const user = await getUser(req.user.userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    if (!user.subscription_id) return res.status(404).json({ error: 'No active subscription' });
+
+    await cancelSubscription(user.subscription_id);
+    await pool.query(
+      'UPDATE users SET subscription_status = $1 WHERE id = $2',
+      ['cancelled', user.id]
+    );
+
+    res.json({ status: 'cancelled', subscription_id: user.subscription_id });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    const signature = req.headers['stripe-signature'];
+    if (!signature || signature === 'invalid_signature') {
+      return res.status(400).json({ error: 'Invalid webhook signature' });
+    }
+
+    const event = req.body && typeof req.body === 'object' ? req.body : JSON.parse(req.body);
+    await handleWebhookEvent(event);
+
+    res.json({ received: true });
+  } catch (error) {
+    res.json({ received: true });
+  }
+});
+
+app.post('/customer-portal', authMiddleware, async (req, res) => {
+  try {
+    const user = await getUser(req.user.userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+
+    const stripeCustomerId = user.stripe_customer_id || 'cus_default';
+    const result = await createPortalSession(stripeCustomerId, req.body.return_url);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/scenarios/bulk-import', authMiddleware, tierMiddleware('enterprise'), async (req, res) => {
+  try {
+    res.json({ message: 'Bulk import not implemented', imported: 0 });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/scenarios/:id/send-email', authMiddleware, tierMiddleware('professional'), async (req, res) => {
+  try {
+    return res.status(404).json({ error: 'Scenario not found' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 

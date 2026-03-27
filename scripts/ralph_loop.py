@@ -17,17 +17,17 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Configuration
 CONFIG = {
-    "MIN_DELAY_SECONDS": 90,      # Minimum gap between Claude calls
-    "MAX_CALLS_PER_HOUR": 8,      # Conservative rate limit
-    "MAX_CALLS_PER_DAY": 30,      # Daily budget
-    "CLAUDE_MAX_TURNS": 20,       # Max turns per Claude session
-    "BACKOFF_BASE_SECONDS": 60,   # Initial wait on 429
-    "MAX_BACKOFF_SECONDS": 600,   # 10 min cap
+    "MIN_DELAY_SECONDS": 0,
+    "MAX_CALLS_PER_HOUR": 999999,
+    "MAX_CALLS_PER_DAY": 999999,
+    "CLAUDE_MAX_TURNS": 20,
+    "BACKOFF_BASE_SECONDS": 60,
+    "MAX_BACKOFF_SECONDS": 600,
 }
 
 STATE_FILE = Path(".ralph_state.json")
@@ -61,7 +61,7 @@ def save_state(state):
 
 def check_rate_limits(state):
     """Verify we're within rate limits before calling Claude"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Clean old calls from state
     calls_today = [
@@ -122,10 +122,10 @@ def run_claude_task(task_id, prompt):
     """Call Claude CLI to execute a task"""
     cmd = [
         "claude",
-        "--no-edit",
+        "--print",
         "--max-turns", str(CONFIG["CLAUDE_MAX_TURNS"]),
-        "--message", prompt,
         "--permission-mode", "bypassPermissions",
+        prompt,
     ]
 
     print(f"\n{GREEN}▶️  Running task: {task_id}{RESET}")
@@ -201,7 +201,7 @@ def main():
         success = run_claude_task(task["id"], task["prompt"])
 
         # Update state
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         state["last_call_at"] = now
         state["calls_today"].append(now)
         state["calls_this_hour"].append(now)

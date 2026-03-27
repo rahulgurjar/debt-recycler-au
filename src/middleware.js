@@ -1,5 +1,6 @@
 const db = require("./db");
 const { getTierFeatures, hasFeatureAccess } = require("./stripe");
+const { verifyToken } = require("./auth");
 
 // In-memory rate limit store (in production, use Redis)
 const rateLimitStore = new Map();
@@ -36,11 +37,22 @@ function tierMiddleware(requiredTier) {
 
       // Check subscription tier
       const tierHierarchy = { starter: 1, professional: 2, enterprise: 3 };
-      const userTierLevel = tierHierarchy[user.subscription_tier] || 0;
+      const userTierLevel = (user.subscription_status === 'active' || user.subscription_status === null)
+        ? (tierHierarchy[user.subscription_tier] || 0)
+        : 0;
       const requiredLevel = tierHierarchy[requiredTier] || 1;
 
       if (userTierLevel >= requiredLevel) {
         return next();
+      }
+
+      // Subscription cancelled - return 403
+      if (user.subscription_status === 'cancelled') {
+        return res.status(403).json({
+          error: 'Subscription cancelled',
+          tier_required: requiredTier,
+          upgrade_url: "/billing/upgrade",
+        });
       }
 
       // Tier insufficient - return 402 Payment Required
@@ -61,7 +73,7 @@ function tierMiddleware(requiredTier) {
  * Rate limiting middleware
  * Limits based on subscription tier
  */
-function rateLimitMiddleware(req, res, next) {
+async function rateLimitMiddleware(req, res, next) {
   try {
     const userId = req.user?.user_id || req.user?.userId;
     const now = Math.floor(Date.now() / 1000);
@@ -78,8 +90,29 @@ function rateLimitMiddleware(req, res, next) {
 
     let limit = tierLimits.free; // Default to free tier limit
 
-    if (userId && req.user?.subscription_tier) {
-      limit = tierLimits[req.user.subscription_tier] || tierLimits.free;
+    let effectiveUserId = userId;
+    if (!effectiveUserId) {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const decoded = verifyToken(authHeader.slice(7));
+          if (decoded) effectiveUserId = decoded.userId || decoded.user_id;
+        } catch (_) {}
+      }
+    }
+
+    if (effectiveUserId) {
+      const subscriptionTier = req.user?.subscription_tier;
+      if (subscriptionTier) {
+        limit = tierLimits[subscriptionTier] || tierLimits.free;
+      } else {
+        try {
+          const user = await db.getUser(effectiveUserId);
+          if (user?.subscription_tier) {
+            limit = tierLimits[user.subscription_tier] || tierLimits.free;
+          }
+        } catch (_) {}
+      }
     }
 
     // Get current count for this hour
@@ -156,6 +189,16 @@ function quotaMiddleware(resourceType) {
         Object.assign(limits, tierLimits.professional);
       }
 
+      // Reset quota if billing cycle has ended
+      if (user.current_period_end && new Date(user.current_period_end) < new Date()) {
+        await db.pool.query(
+          'UPDATE users SET monthly_scenarios_used = 0, monthly_clients_used = 0 WHERE id = $1',
+          [user.id]
+        );
+        user.monthly_scenarios_used = 0;
+        user.monthly_clients_used = 0;
+      }
+
       // Check quota based on resource type
       if (resourceType === "scenario") {
         const monthlyUsed = user.monthly_scenarios_used || 0;
@@ -202,14 +245,11 @@ function quotaMiddleware(resourceType) {
  * Adds available features to response
  */
 function featureAvailabilityMiddleware(req, res, next) {
-  try {
-    const tier = req.user?.subscription_tier || "free";
+  const userId = req.user?.user_id || req.user?.userId;
+
+  const applyFeatures = (tier) => {
     const features = getTierFeatures(tier).features;
-
-    // Store in request for later use
     req.availableFeatures = features;
-
-    // Wrap res.json to add features
     const originalJson = res.json.bind(res);
     res.json = function (data) {
       if (typeof data === "object" && data !== null) {
@@ -217,11 +257,17 @@ function featureAvailabilityMiddleware(req, res, next) {
       }
       return originalJson(data);
     };
+    next();
+  };
 
-    next();
-  } catch (error) {
-    console.error("Feature availability middleware error:", error);
-    next();
+  if (userId) {
+    db.getUser(userId).then(user => {
+      applyFeatures(user?.subscription_tier || "free");
+    }).catch(() => {
+      applyFeatures(req.user?.subscription_tier || "free");
+    });
+  } else {
+    applyFeatures(req.user?.subscription_tier || "free");
   }
 }
 

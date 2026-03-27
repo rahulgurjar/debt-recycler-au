@@ -1,7 +1,7 @@
 # Debt Recycling Calculator - Specification
 
 ## Overview
-This calculator models a 20-year wealth projection strategy using debt recycling principles for Australian investors. The spreadsheet GearedPF_v4.csv is the authoritative source of truth for all formulas and expected outputs.
+Debt Recycler AU is a comprehensive wealth projection and financial advisory platform for Australian investors. It models 20-year debt recycling strategies and provides team-based scenario management with secure authentication. The core calculator is built on GearedPF_v4.csv as the authoritative source of truth.
 
 ## Input Parameters
 - **Initial Outlay**: $55,000 (personal capital investment)
@@ -113,3 +113,239 @@ All calculations use standard floating-point arithmetic. Results should match sp
 
 ## Data Source
 All formulas and expected values verified against: `/tmp/GearedPF_v4---84248c26-7f68-40bd-b1b4-13e0d99b45e9.csv` (TABLE 1)
+
+---
+
+# Authentication & User Management
+
+## Feature Overview
+Debt Recycler AU provides flexible authentication for different user types:
+1. **Registered Users** - Email + password with persistent accounts
+2. **Anonymous Users** - Instant access without signup for quick testing
+3. **Team Workspaces** - Multi-user teams with role-based access control
+
+## Authentication Methods
+
+### 1. Email/Password Registration
+**Endpoint**: `POST /auth/signup`
+
+**Required Fields**:
+- `email` - Valid email address (required)
+- `password` - Minimum 8 characters (required)
+- `company_name` - Organization name (optional, defaults to "Company")
+
+**Response**:
+```json
+{
+  "user": { "id": "uuid", "email": "user@example.com", "company_name": "Acme Inc" },
+  "token": "JWT-token-here"
+}
+```
+
+**Success Criteria**:
+- Account created in PostgreSQL users table
+- Password hashed with bcrypt
+- JWT token issued (30-minute expiry)
+- User role defaults to 'admin'
+
+### 2. Email/Password Login
+**Endpoint**: `POST /auth/login`
+
+**Required Fields**:
+- `email` - Registered email (required)
+- `password` - Account password (required)
+
+**Response**:
+```json
+{
+  "user": { "id": "uuid", "email": "user@example.com", "role": "admin" },
+  "token": "JWT-token-here"
+}
+```
+
+**Success Criteria**:
+- Credentials validated against stored bcrypt hash
+- JWT token issued with 30-minute expiry
+- User role returned in token
+
+### 3. Anonymous Access (NEW)
+**Endpoint**: `POST /auth/anonymous`
+
+**Request**:
+```json
+{}
+```
+
+**Response**:
+```json
+{
+  "user": { "id": "anonymous_uuid", "email": null, "role": "guest" },
+  "token": "JWT-token-here"
+}
+```
+
+**Implementation Details**:
+- No database record created (stateless session)
+- Token expires in 30 minutes
+- User role set to 'guest'
+- Read-only access to `/api/calculate` (no scenario saving)
+- Can perform unlimited debt recycling calculations
+- Cannot save scenarios or access team features
+
+**Use Case**:
+- Visitors wanting to try the calculator instantly
+- No signup friction or email verification required
+- Full calculator access without persistent data storage
+
+### 4. Password Reset
+**Endpoints**:
+- `POST /auth/forgot-password` - Request reset token
+- `POST /auth/reset-password` - Complete password reset with token
+
+**Forgot Password Request**:
+```json
+{ "email": "user@example.com" }
+```
+
+**Reset Password**:
+```json
+{ "reset_token": "token-from-email", "new_password": "SecurePass123!" }
+```
+
+**Success Criteria**:
+- Reset token generated and stored
+- Token expires in 1 hour
+- New password hashed and stored
+- Old password invalidated
+
+### 5. Session Management
+**Endpoint**: `GET /auth/me`
+
+**Requires**: Valid JWT token in Authorization header
+
+**Response**:
+```json
+{ "id": "uuid", "email": "user@example.com", "role": "admin" }
+```
+
+**Logout**: `POST /auth/logout`
+- Clears client-side token
+- No server-side session tracking required
+
+## Token Specification
+
+### JWT Token Format
+- **Algorithm**: HS256
+- **Expiry**: 30 minutes (1800 seconds)
+- **Payload Fields**:
+  - `sub` - User ID or "anonymous" for guests
+  - `email` - User email or null for guests
+  - `role` - 'admin', 'advisor', 'client', or 'guest'
+  - `iat` - Token issued at (Unix timestamp)
+  - `exp` - Token expiry (Unix timestamp)
+
+### Token Validation
+- Verify signature with JWT secret
+- Check expiry timestamp
+- Validate role for protected endpoints
+
+## Authorization & Role-Based Access
+
+| Endpoint | Guest | Client | Advisor | Admin |
+|----------|-------|--------|---------|-------|
+| POST /api/calculate | ✅ | ✅ | ✅ | ✅ |
+| POST /api/scenarios | ❌ | ❌ | ✅ | ✅ |
+| GET /api/scenarios | ❌ | ❌ | ✅ | ✅ |
+| POST /clients | ❌ | ❌ | ✅ | ✅ |
+| POST /workspace/users | ❌ | ❌ | ❌ | ✅ |
+
+## API Endpoints
+
+### Calculation Endpoints
+- **POST /api/calculate** - Run debt recycling projection (no auth required)
+- **POST /api/scenarios** - Save scenario (requires auth, advisor+ role)
+- **GET /api/scenarios** - List scenarios (requires auth)
+- **GET /api/scenarios/:id** - Get scenario details (requires auth)
+
+### Authentication Endpoints
+- **POST /auth/signup** - Create new account
+- **POST /auth/login** - Authenticate with credentials
+- **POST /auth/anonymous** - Start guest session (NEW)
+- **POST /auth/logout** - End session
+- **GET /auth/me** - Get current user profile
+- **POST /auth/forgot-password** - Request password reset
+- **POST /auth/reset-password** - Complete password reset
+
+### Workspace Endpoints (Admin Only)
+- **GET /workspace** - Get workspace details
+- **POST /workspace/users** - Add team member
+- **GET /workspace/settings** - Get subscription settings
+- **PATCH /workspace/settings** - Update subscription tier
+
+## Database Schema
+
+### Users Table
+```sql
+CREATE TABLE users (
+  id UUID PRIMARY KEY,
+  email VARCHAR(255) UNIQUE,
+  password_hash VARCHAR(255),
+  company_name VARCHAR(255),
+  role VARCHAR(50) DEFAULT 'admin',
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### Reset Tokens Table
+```sql
+CREATE TABLE reset_tokens (
+  id SERIAL PRIMARY KEY,
+  user_id UUID REFERENCES users(id),
+  token VARCHAR(255) UNIQUE,
+  expires_at TIMESTAMP,
+  used_at TIMESTAMP
+);
+```
+
+## Verification Commands
+
+### Test Anonymous Login
+```bash
+curl -X POST https://your-domain.com/auth/anonymous \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+### Test Registered Login
+```bash
+curl -X POST https://your-domain.com/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "password123"}'
+```
+
+### Use Token to Calculate
+```bash
+curl -X POST https://your-domain.com/api/calculate \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer TOKEN_HERE" \
+  -d '{"initial_outlay": 55000}'
+```
+
+## Production Deployment
+
+### Environment Variables Required
+- `JWT_SECRET` - Secret key for signing tokens (min 32 characters)
+- `DB_HOST` - PostgreSQL hostname
+- `DB_PORT` - PostgreSQL port (default 5432)
+- `DB_NAME` - Database name
+- `DB_USER` - Database username
+- `DB_PASSWORD` - Database password
+
+### Security Requirements
+- HTTPS only (HTTP disabled)
+- CORS limited to approved domains
+- Password minimum 8 characters
+- JWT secret stored in AWS Secrets Manager
+- Database credentials in Lambda environment variables
+- No sensitive data in logs
