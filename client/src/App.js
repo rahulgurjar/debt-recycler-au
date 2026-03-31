@@ -10,11 +10,15 @@ import AnalyticsCards from './components/AnalyticsCards';
 import WorkspaceManager from './components/WorkspaceManager';
 import ScenarioForm from './components/ScenarioForm';
 import BillingPage from './components/BillingPage';
+import ClientPortal from './components/ClientPortal';
 import './App.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
 
 function App() {
+  const params = new URLSearchParams(window.location.search);
+  const portalToken = params.get('portal_token');
+
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authPage, setAuthPage] = useState('login');
   const [activeTab, setActiveTab] = useState('calculator');
@@ -33,6 +37,7 @@ function App() {
   };
 
   useEffect(() => {
+    if (portalToken) return;
     const token = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
     if (token && savedUser) {
@@ -41,6 +46,10 @@ function App() {
       fetchUserTier();
     }
   }, []);
+
+  if (portalToken) {
+    return <ClientPortal portalToken={portalToken} />;
+  }
 
   const handleLoginSuccess = () => {
     const savedUser = localStorage.getItem('user');

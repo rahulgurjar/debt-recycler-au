@@ -11,7 +11,10 @@
     "lint": "eslint src tests",
     "format": "prettier --write src tests",
     "migrate": "node scripts/migrate.js",
-    "verify:production": "node tests/auth_production.js"
+    "verify:production": "node tests/auth_production.js",
+    "verify:dashboard": "node tests/dashboard_ui_production.js",
+    "verify:scenarios": "node tests/scenarios_ui_production.js",
+    "verify:client_portal": "node tests/client_portal_production.js"
   },
   "keywords": [
     "debt-recycling",

@@ -9,6 +9,7 @@
 
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 const { calculate } = require('./calculator');
 const { pool, saveScenario, getScenarios, getScenario, deleteScenario, healthCheck, createUser, getUser, getUserByEmail, updateUserPassword, addResetToken, getAndVerifyResetToken, createScenarioVersion, getScenarioVersions, getScenarioVersion, getVersionCount, getAdminByCompany, updateUserSubscription, createEmailLog } = require('./db');
 const { validateEmail, validatePassword, hashPassword, comparePassword, generateToken, verifyToken, generateResetToken, RESET_TOKEN_EXPIRY } = require('./auth');
@@ -1551,6 +1552,84 @@ app.post('/scenarios/:id/email', authMiddleware, async (req, res) => {
     }
 
     res.json(response);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /portal/generate
+ * Generate a read-only portal token for a client (advisor/admin only)
+ */
+app.post('/portal/generate', authMiddleware, async (req, res) => {
+  try {
+    const { client_id } = req.body;
+    if (!client_id) return res.status(400).json({ error: 'client_id is required' });
+
+    const clientRes = await pool.query(
+      'SELECT id, name, email FROM clients WHERE id = $1 AND customer_id = $2',
+      [client_id, req.user.userId]
+    );
+    if (clientRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const client = clientRes.rows[0];
+    const portalToken = jwt.sign(
+      { clientId: client.id, advisorId: req.user.userId, type: 'portal' },
+      process.env.JWT_SECRET || 'dev-secret-change-in-production',
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      portal_token: portalToken,
+      client_name: client.name,
+      portal_url: `https://d1p3am5bl1sho7.cloudfront.net/?portal_token=${portalToken}`,
+      expires_in: '7 days',
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /portal/scenarios
+ * Get client's scenarios using a portal token (read-only, no auth required)
+ */
+app.get('/portal/scenarios', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(401).json({ error: 'Portal token required' });
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret-change-in-production');
+    } catch (e) {
+      return res.status(401).json({ error: 'Invalid or expired portal token' });
+    }
+
+    if (decoded.type !== 'portal') {
+      return res.status(401).json({ error: 'Invalid portal token type' });
+    }
+
+    const clientRes = await pool.query(
+      'SELECT id, name, email FROM clients WHERE id = $1',
+      [decoded.clientId]
+    );
+    if (clientRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const scenariosRes = await pool.query(
+      `SELECT id, name, final_wealth, xirr, initial_outlay, gearing_ratio, annual_investment, created_at
+       FROM scenarios WHERE client_id = $1 ORDER BY created_at DESC`,
+      [decoded.clientId]
+    );
+
+    res.json({
+      client: clientRes.rows[0],
+      scenarios: scenariosRes.rows,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
