@@ -9,6 +9,7 @@ import ClientsTable from './components/ClientsTable';
 import AnalyticsCards from './components/AnalyticsCards';
 import WorkspaceManager from './components/WorkspaceManager';
 import ScenarioForm from './components/ScenarioForm';
+import BillingPage from './components/BillingPage';
 import './App.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
@@ -132,6 +133,12 @@ function App() {
           Workspace
         </button>
         <button
+          className={`nav-btn ${activeTab === 'billing' ? 'active' : ''}`}
+          onClick={() => setActiveTab('billing')}
+        >
+          Billing
+        </button>
+        <button
           className={`nav-btn ${activeTab === 'tutorial' ? 'active' : ''}`}
           onClick={() => setActiveTab('tutorial')}
         >
@@ -146,6 +153,7 @@ function App() {
         {activeTab === 'clients' && <ClientsTable />}
         {activeTab === 'analytics' && <AnalyticsCards />}
         {activeTab === 'workspace' && <WorkspaceManager userRole={user?.role} />}
+        {activeTab === 'billing' && <BillingPage />}
         {activeTab === 'tutorial' && <Tutorial />}
       </main>
 
