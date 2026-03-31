@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import Dashboard from './components/Dashboard';
 import ScenarioList from './components/ScenarioList';
 import Tutorial from './components/Tutorial';
@@ -10,11 +11,25 @@ import WorkspaceManager from './components/WorkspaceManager';
 import ScenarioForm from './components/ScenarioForm';
 import './App.css';
 
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authPage, setAuthPage] = useState('login');
   const [activeTab, setActiveTab] = useState('calculator');
   const [user, setUser] = useState(null);
+  const [userTier, setUserTier] = useState('starter');
+
+  const fetchUserTier = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/workspace`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setUserTier(res.data.workspace?.subscription_tier || 'starter');
+    } catch (err) {
+      setUserTier('starter');
+    }
+  };
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -22,12 +37,16 @@ function App() {
     if (token && savedUser) {
       setIsAuthenticated(true);
       setUser(JSON.parse(savedUser));
+      fetchUserTier();
     }
   }, []);
 
   const handleLoginSuccess = () => {
+    const savedUser = localStorage.getItem('user');
+    if (savedUser) setUser(JSON.parse(savedUser));
     setIsAuthenticated(true);
     setActiveTab('calculator');
+    fetchUserTier();
   };
 
   const handleLogout = () => {
@@ -122,7 +141,7 @@ function App() {
 
       <main className="app-main">
         {activeTab === 'calculator' && <Dashboard />}
-        {activeTab === 'scenarios' && <ScenarioList />}
+        {activeTab === 'scenarios' && <ScenarioList userTier={userTier} />}
         {activeTab === 'new-scenario' && <ScenarioForm onScenarioCreated={() => setActiveTab('scenarios')} />}
         {activeTab === 'clients' && <ClientsTable />}
         {activeTab === 'analytics' && <AnalyticsCards />}

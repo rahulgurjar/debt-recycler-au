@@ -126,15 +126,19 @@ npm run verify:production {feature_name}
 
 ## Success Criteria
 
-A feature is DONE when:
+A feature is DONE when ALL of the following are true:
 1. ✅ SPEC document exists with V1-V5 requirements
-2. ✅ 25+ acceptance tests written and passing
+2. ✅ 25+ acceptance tests written and passing (Jest)
 3. ✅ Code implements feature (passes tests)
-4. ✅ Deployed to production
-5. ✅ Chrome MCP verification script passes
-6. ✅ SPEC includes "Production Verification" section with reproducible steps
-7. ✅ PR includes verification evidence (screenshots, test results)
-8. ✅ Anyone can follow SPEC steps and reproduce verification
+4. ✅ Deployed to production (Lambda + S3/CloudFront)
+5. ✅ **Feature is accessible and usable from the frontend UI at https://d1p3am5bl1sho7.cloudfront.net** — not just via curl/API
+6. ✅ Chrome MCP verification script written (`tests/{feature}_production.js`) and passes against live production
+7. ✅ SPEC includes "Production Verification" section with reproducible steps
+8. ✅ PR includes verification evidence (screenshots, test results)
+9. ✅ Anyone can follow SPEC steps and reproduce verification via the website
+
+**A task with only backend API endpoints and no frontend UI is NOT done.**
+**A task without a passing Chrome MCP verification script is NOT done.**
 
 ## Next Feature Checklist
 
