@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import UpgradePrompt from './UpgradePrompt';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
 
@@ -25,6 +26,7 @@ function ScenarioForm({ onScenarioCreated }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
 
   const authHeader = () => ({
     headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
@@ -65,7 +67,11 @@ function ScenarioForm({ onScenarioCreated }) {
       setResult(res.data);
       if (onScenarioCreated) onScenarioCreated();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create scenario');
+      if (err.response?.status === 402) {
+        setShowUpgrade(true);
+      } else {
+        setError(err.response?.data?.error || 'Failed to create scenario');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -79,6 +85,14 @@ function ScenarioForm({ onScenarioCreated }) {
   return (
     <div className="scenario-form-container">
       <h2>Create Scenario</h2>
+
+      {showUpgrade && (
+        <UpgradePrompt
+          message="Monthly scenario limit reached. Upgrade to create more scenarios."
+          onUpgrade={() => { setShowUpgrade(false); if (onScenarioCreated) onScenarioCreated('billing'); }}
+          onDismiss={() => setShowUpgrade(false)}
+        />
+      )}
 
       {error && <div className="error-message">{error}</div>}
 

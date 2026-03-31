@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import ScenarioVersions from './ScenarioVersions';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
 
@@ -118,6 +119,8 @@ function ScenarioActions({ scenario, userTier }) {
       </div>
 
       {emailStatus && <div className="success-message">{emailStatus}</div>}
+
+      <ScenarioVersions scenarioId={scenario.id} />
 
       {emailOpen && (
         <form className="email-form" onSubmit={handleSendEmail}>
