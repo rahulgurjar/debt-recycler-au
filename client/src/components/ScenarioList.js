@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import ScenarioActions from './ScenarioActions';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
 
-function ScenarioList({ refresh }) {
+function ScenarioList({ refresh, userTier }) {
   const [scenarios, setScenarios] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -13,27 +14,27 @@ function ScenarioList({ refresh }) {
     fetchScenarios();
   }, [refresh]);
 
+  const authHeader = () => ({
+    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+  });
+
   const fetchScenarios = async () => {
     setLoading(true);
     setError('');
     try {
-      const response = await axios.get(`${API_URL}/api/scenarios`);
+      const response = await axios.get(`${API_URL}/api/scenarios`, authHeader());
       setScenarios(response.data.scenarios || []);
     } catch (err) {
       setError('Failed to load scenarios');
-      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this scenario?')) return;
-
     try {
-      await axios.delete(`${API_URL}/api/scenarios/${id}`);
+      await axios.delete(`${API_URL}/scenarios/${id}`, authHeader());
       setScenarios(scenarios.filter((s) => s.id !== id));
-      alert('Scenario deleted');
     } catch (err) {
       setError('Failed to delete scenario');
     }
@@ -113,7 +114,6 @@ function ScenarioList({ refresh }) {
 
       {selectedScenario && (
         <div className="scenario-detail">
-          <h2>{selectedScenario.name}</h2>
           <div className="detail-grid">
             <div className="detail-item">
               <span>Final Wealth:</span>
@@ -148,6 +148,7 @@ function ScenarioList({ refresh }) {
               <strong>{formatPercent(selectedScenario.etf_capital_appreciation)}</strong>
             </div>
           </div>
+          <ScenarioActions scenario={selectedScenario} userTier={userTier || 'starter'} />
           <button
             className="delete-btn"
             onClick={() => {

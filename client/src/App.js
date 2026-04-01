@@ -1,29 +1,62 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import Dashboard from './components/Dashboard';
 import ScenarioList from './components/ScenarioList';
 import Tutorial from './components/Tutorial';
 import Login from './components/Login';
 import Signup from './components/Signup';
+import ClientsTable from './components/ClientsTable';
+import AnalyticsCards from './components/AnalyticsCards';
+import WorkspaceManager from './components/WorkspaceManager';
+import ScenarioForm from './components/ScenarioForm';
+import BillingPage from './components/BillingPage';
+import ClientPortal from './components/ClientPortal';
 import './App.css';
 
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+
 function App() {
+  const params = new URLSearchParams(window.location.search);
+  const portalToken = params.get('portal_token');
+
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authPage, setAuthPage] = useState('login');
   const [activeTab, setActiveTab] = useState('calculator');
   const [user, setUser] = useState(null);
+  const [userTier, setUserTier] = useState('starter');
+
+  const fetchUserTier = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/workspace`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setUserTier(res.data.workspace?.subscription_tier || 'starter');
+    } catch (err) {
+      setUserTier('starter');
+    }
+  };
 
   useEffect(() => {
+    if (portalToken) return;
     const token = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
     if (token && savedUser) {
       setIsAuthenticated(true);
       setUser(JSON.parse(savedUser));
+      fetchUserTier();
     }
   }, []);
 
+  if (portalToken) {
+    return <ClientPortal portalToken={portalToken} />;
+  }
+
   const handleLoginSuccess = () => {
+    const savedUser = localStorage.getItem('user');
+    if (savedUser) setUser(JSON.parse(savedUser));
     setIsAuthenticated(true);
     setActiveTab('calculator');
+    fetchUserTier();
   };
 
   const handleLogout = () => {
@@ -83,16 +116,53 @@ function App() {
           Saved Scenarios
         </button>
         <button
+          className={`nav-btn ${activeTab === 'new-scenario' ? 'active' : ''}`}
+          onClick={() => setActiveTab('new-scenario')}
+        >
+          New Scenario
+        </button>
+        <button
+          className={`nav-btn ${activeTab === 'clients' ? 'active' : ''}`}
+          onClick={() => setActiveTab('clients')}
+        >
+          Clients
+        </button>
+        {user?.role === 'admin' && (
+          <button
+            className={`nav-btn ${activeTab === 'analytics' ? 'active' : ''}`}
+            onClick={() => setActiveTab('analytics')}
+          >
+            Analytics
+          </button>
+        )}
+        <button
+          className={`nav-btn ${activeTab === 'workspace' ? 'active' : ''}`}
+          onClick={() => setActiveTab('workspace')}
+        >
+          Workspace
+        </button>
+        <button
+          className={`nav-btn ${activeTab === 'billing' ? 'active' : ''}`}
+          onClick={() => setActiveTab('billing')}
+        >
+          Billing
+        </button>
+        <button
           className={`nav-btn ${activeTab === 'tutorial' ? 'active' : ''}`}
           onClick={() => setActiveTab('tutorial')}
         >
-          Tutorial & Verification
+          Tutorial
         </button>
       </nav>
 
       <main className="app-main">
         {activeTab === 'calculator' && <Dashboard />}
-        {activeTab === 'scenarios' && <ScenarioList />}
+        {activeTab === 'scenarios' && <ScenarioList userTier={userTier} />}
+        {activeTab === 'new-scenario' && <ScenarioForm onScenarioCreated={() => setActiveTab('scenarios')} />}
+        {activeTab === 'clients' && <ClientsTable />}
+        {activeTab === 'analytics' && <AnalyticsCards />}
+        {activeTab === 'workspace' && <WorkspaceManager userRole={user?.role} />}
+        {activeTab === 'billing' && <BillingPage />}
         {activeTab === 'tutorial' && <Tutorial />}
       </main>
 

@@ -109,6 +109,51 @@ describe('Workspace Management API', () => {
 
       expect(res.status).toBe(400);
     });
+
+    it('should assign invited user to same company as admin', async () => {
+      const res = await request(app)
+        .post('/workspace/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          email: 'samecompany@company.com',
+          role: 'advisor',
+        });
+
+      expect(res.status).toBe(201);
+
+      const workspaceRes = await request(app)
+        .get('/workspace')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      const member = workspaceRes.body.team_members.find(
+        (m) => m.email === 'samecompany@company.com'
+      );
+      expect(member).toBeDefined();
+    });
+
+    it('should enforce invite rate limit of 10 per day', async () => {
+      const rlAdminRes = await request(app)
+        .post('/auth/signup')
+        .send({
+          email: 'ratelimitadmin@rlcompany.com',
+          password: 'RLAdminPass123!',
+          company_name: 'RL Company',
+        });
+      const rlAdminToken = rlAdminRes.body.token;
+
+      let lastRes;
+      for (let i = 0; i < 12; i++) {
+        lastRes = await request(app)
+          .post('/workspace/users')
+          .set('Authorization', `Bearer ${rlAdminToken}`)
+          .send({
+            email: `ratelimit${i}@rlcompany.com`,
+            role: 'advisor',
+          });
+      }
+      expect(lastRes.status).toBe(429);
+      expect(lastRes.body.error).toMatch(/limit/i);
+    });
   });
 
   describe('PATCH /workspace/users/:userId', () => {
