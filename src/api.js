@@ -915,7 +915,9 @@ app.get('/scenarios/:id/versions', authMiddleware, async (req, res) => {
     }
 
     const versions = await getScenarioVersions(req.params.id, limit, offset);
-    versions.forEach(v => { v.parameters = JSON.parse(v.parameters); });
+    versions.forEach((v, idx) => {
+      v.version_number = versions.length - idx;
+    });
 
     res.json({ versions });
   } catch (error) {
@@ -945,7 +947,7 @@ app.get('/scenarios/:id/versions/compare', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'One or both versions not found' });
     }
 
-    const paramsFrom = JSON.parse(versionFrom.parameters);
+    const paramsFrom = versionFrom.parameters;
     let paramsTo;
 
     if (fromId === toId) {
@@ -966,7 +968,7 @@ app.get('/scenarios/:id/versions/compare', authMiddleware, async (req, res) => {
       if (!versionTo || versionTo.scenario_id !== parseInt(req.params.id, 10)) {
         return res.status(404).json({ error: 'One or both versions not found' });
       }
-      paramsTo = JSON.parse(versionTo.parameters);
+      paramsTo = versionTo.parameters;
     }
 
     const changes = [];
@@ -1009,8 +1011,6 @@ app.get('/scenarios/:id/versions/:versionId', authMiddleware, async (req, res) =
       return res.status(404).json({ error: 'Version not found' });
     }
 
-    version.parameters = JSON.parse(version.parameters);
-
     res.json({ version });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1030,7 +1030,7 @@ app.post('/scenarios/:id/versions/:versionId/restore', authMiddleware, async (re
       return res.status(404).json({ error: 'Version not found' });
     }
 
-    const params = JSON.parse(version.parameters);
+    const params = version.parameters;
 
     const projection = calculate(params);
 

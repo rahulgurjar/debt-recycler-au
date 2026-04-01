@@ -290,7 +290,11 @@ async function getScenarioVersions(scenarioId, limit = 50, offset = 0) {
        LIMIT $2 OFFSET $3`,
       [scenarioId, limit, offset]
     );
-    return result.rows;
+    const rows = result.rows;
+    rows.forEach(v => {
+      if (typeof v.parameters === 'string') v.parameters = JSON.parse(v.parameters);
+    });
+    return rows;
   } catch (error) {
     console.error('Error fetching scenario versions:', error);
     throw error;
@@ -305,7 +309,9 @@ async function getScenarioVersion(versionId) {
        WHERE id = $1`,
       [versionId]
     );
-    return result.rows[0] || null;
+    const row = result.rows[0] || null;
+    if (row && typeof row.parameters === 'string') row.parameters = JSON.parse(row.parameters);
+    return row;
   } catch (error) {
     console.error('Error fetching scenario version:', error);
     throw error;

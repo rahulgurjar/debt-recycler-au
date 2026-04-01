@@ -14,7 +14,13 @@
     "verify:production": "node tests/auth_production.js",
     "verify:dashboard": "node tests/dashboard_ui_production.js",
     "verify:scenarios": "node tests/scenarios_ui_production.js",
-    "verify:client_portal": "node tests/client_portal_production.js"
+    "verify:client_portal": "node tests/client_portal_production.js",
+    "verify:report_generation_ui": "node tests/report_generation_ui_production.js",
+    "verify:excel_export_ui": "node tests/excel_export_ui_production.js",
+    "verify:email_ui": "node tests/email_ui_production.js",
+    "verify:billing_ui": "node tests/billing_ui_production.js",
+    "verify:tier_enforcement_ui": "node tests/tier_enforcement_ui_production.js",
+    "verify:scenario_versioning_ui": "node tests/scenario_versioning_ui_production.js"
   },
   "keywords": [
     "debt-recycling",
@@ -25,7 +31,7 @@
   "license": "MIT",
   "dependencies": {
     "aws-sdk": "^2.1633.0",
-    "bcrypt": "^5.1.1",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "exceljs": "^4.4.0",
